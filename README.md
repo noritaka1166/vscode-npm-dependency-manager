@@ -1,0 +1,1 @@
+# vscode-npm-dependency-manager
