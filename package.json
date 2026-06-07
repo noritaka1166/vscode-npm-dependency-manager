@@ -1,0 +1,59 @@
+{
+  "name": "workspace-npm-sidebar",
+  "displayName": "Workspace npm Sidebar",
+  "description": "Browse package.json dependencies from the VS Code sidebar and compare them with npm registry versions.",
+  "version": "0.0.1",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:workspaceNpmSidebar.dependenciesView",
+    "onCommand:workspaceNpmSidebar.show",
+    "onCommand:workspaceNpmSidebar.refresh",
+    "onCommand:workspaceNpmSidebar.openPackage"
+  ],
+  "main": "./extension.js",
+  "scripts": {
+    "check": "node --check extension.js && node --check media/main.js"
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "workspaceNpmSidebar",
+          "title": "npm Packages",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "workspaceNpmSidebar": [
+        {
+          "id": "workspaceNpmSidebar.dependenciesView",
+          "name": "Dependencies"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "workspaceNpmSidebar.show",
+        "title": "npm Packages: Show Dashboard"
+      },
+      {
+        "command": "workspaceNpmSidebar.refresh",
+        "title": "npm Packages: Refresh"
+      },
+      {
+        "command": "workspaceNpmSidebar.openPackage",
+        "title": "npm Packages: Open Package"
+      }
+    ]
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0"
+  }
+}
