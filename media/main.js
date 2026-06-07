@@ -111,31 +111,54 @@
 
   function renderDetail(detail) {
     app.innerHTML = `
-      <section class="detailTop">
-        <button id="backButton" class="iconButton" title="Back">‹</button>
-        <div>
-          <h1>${escapeHtml(detail.name)}</h1>
-          <p>${escapeHtml(detail.description || '')}</p>
+      <div class="detailPage">
+        <header class="packageHeader">
+          <button id="backButton" class="backButton" title="Back">‹</button>
+          <div class="packageIdentity">
+            <div class="packageTitleLine">
+              <h1>${escapeHtml(detail.name)}</h1>
+              <span class="risk packageRisk">${renderRisk(detail)}</span>
+            </div>
+            <p>${escapeHtml(detail.description || 'No description provided.')}</p>
+          </div>
+        </header>
+
+        <div class="packageLayout">
+          <article class="readmePanel">
+            <div class="sectionTitle">README</div>
+            <div class="readme">${markdownToHtml(detail.readme)}</div>
+          </article>
+
+          <aside class="packageSidebar">
+            <section class="sideSection">
+              <h2>Install</h2>
+              <code class="installCommand">npm i ${escapeHtml(detail.name)}</code>
+            </section>
+
+            <section class="sideSection">
+              <h2>Versions</h2>
+              <dl class="facts">
+                ${detail.resolvedVersion ? `<div><dt>Resolved</dt><dd>${escapeHtml(detail.resolvedVersion)}</dd></div>` : ''}
+                <div><dt>Resolved published</dt><dd>${renderDate(detail.resolvedPublishedAt)}</dd></div>
+                <div><dt>Latest</dt><dd>${escapeHtml(detail.latestVersion || '-')}</dd></div>
+                <div><dt>Latest published</dt><dd>${renderDate(detail.latestPublishedAt)}</dd></div>
+                ${detail.license ? `<div><dt>License</dt><dd>${escapeHtml(detail.license)}</dd></div>` : ''}
+              </dl>
+            </section>
+
+            ${renderSecurity(detail)}
+
+            <section class="sideSection">
+              <h2>Links</h2>
+              <nav class="packageLinks">
+                <a href="${escapeAttr(detail.npmUrl)}">npm</a>
+                ${detail.homepage ? `<a href="${escapeAttr(detail.homepage)}">Homepage</a>` : ''}
+                ${detail.repository ? `<a href="${escapeAttr(detail.repository)}">Repository</a>` : ''}
+              </nav>
+            </section>
+          </aside>
         </div>
-      </section>
-
-      <section class="meta">
-        ${detail.resolvedVersion ? `<div><span>Resolved</span><strong>${escapeHtml(detail.resolvedVersion)}</strong></div>` : ''}
-        <div><span>Resolved published</span><strong>${renderDate(detail.resolvedPublishedAt)}</strong></div>
-        <div><span>Latest</span><strong>${escapeHtml(detail.latestVersion || '-')}</strong></div>
-        <div><span>Latest published</span><strong>${renderDate(detail.latestPublishedAt)}</strong></div>
-        ${detail.license ? `<div><span>License</span><strong>${escapeHtml(detail.license)}</strong></div>` : ''}
-      </section>
-
-      ${renderSecurity(detail)}
-
-      <section class="links">
-        <a href="${escapeAttr(detail.npmUrl)}">npm</a>
-        ${detail.homepage ? `<a href="${escapeAttr(detail.homepage)}">Homepage</a>` : ''}
-        ${detail.repository ? `<a href="${escapeAttr(detail.repository)}">Repository</a>` : ''}
-      </section>
-
-      <article class="readme">${markdownToHtml(detail.readme)}</article>
+      </div>
     `;
 
     document.getElementById('backButton').addEventListener('click', () => {
@@ -189,11 +212,11 @@
   function renderSecurity(detail) {
     const vulnerabilities = detail.vulnerabilities || [];
     if (!detail.deprecated && !vulnerabilities.length && detail.auditStatus !== 'unknown') {
-      return '<section class="security okPanel"><h2>Security</h2><p>No deprecation or known vulnerabilities found for the resolved version.</p></section>';
+      return '<section class="sideSection security okPanel"><h2>Security</h2><p>No deprecation or known vulnerabilities found for the resolved version.</p></section>';
     }
 
     return `
-      <section class="security">
+      <section class="sideSection security">
         <h2>Security</h2>
         ${detail.deprecated ? `<div class="notice deprecatedNotice"><strong>Deprecated</strong><p>${escapeHtml(detail.deprecatedMessage || 'This package version is deprecated.')}</p></div>` : ''}
         ${detail.auditStatus === 'unknown' ? `<div class="notice unknownNotice"><strong>Vulnerabilities not checked</strong><p>${escapeHtml(detail.auditError || 'A resolved version was not available. Add or update package-lock.json for more accurate audit results.')}</p></div>` : ''}
@@ -218,6 +241,7 @@
 
   function markdownToHtml(markdown) {
     const source = String(markdown || '').replace(/\r\n?/g, '\n');
+    const references = collectMarkdownReferences(source);
     const lines = source.split('\n');
     const html = [];
     let paragraph = [];
@@ -226,12 +250,13 @@
     let inCode = false;
     let codeLanguage = '';
     let codeLines = [];
+    let htmlCenter = false;
 
     function flushParagraph() {
       if (!paragraph.length) {
         return;
       }
-      html.push(`<p>${renderInline(paragraph.join(' '))}</p>`);
+      html.push(`<p>${renderInline(paragraph.join(' '), references)}</p>`);
       paragraph = [];
     }
 
@@ -239,7 +264,7 @@
       if (!list) {
         return;
       }
-      html.push(`<${list.type}>${list.items.map((item) => `<li>${renderInline(item)}</li>`).join('')}</${list.type}>`);
+      html.push(`<${list.type}>${list.items.map((item) => `<li>${renderInline(item, references)}</li>`).join('')}</${list.type}>`);
       list = null;
     }
 
@@ -247,7 +272,7 @@
       if (!blockquote.length) {
         return;
       }
-      html.push(`<blockquote>${blockquote.map((line) => `<p>${renderInline(line)}</p>`).join('')}</blockquote>`);
+      html.push(`<blockquote>${blockquote.map((line) => `<p>${renderInline(line, references)}</p>`).join('')}</blockquote>`);
       blockquote = [];
     }
 
@@ -258,6 +283,10 @@
     }
 
     lines.forEach((line) => {
+      if (isReferenceDefinitionLine(line)) {
+        return;
+      }
+
       const fenceMatch = line.match(/^```([A-Za-z0-9_-]+)?\s*$/);
       if (fenceMatch) {
         if (inCode) {
@@ -284,11 +313,28 @@
         return;
       }
 
+      const opensCenteredHtml = /<(div|p)\b[^>]*align=["']?center["']?[^>]*>/i.test(line);
+      const closesCenteredHtml = /<\/(div|p)>/i.test(line);
+      const htmlSnippet = renderAllowedHtmlSnippet(line, htmlCenter || opensCenteredHtml, references);
+      if (htmlSnippet !== null) {
+        flushOpenBlocks();
+        if (htmlSnippet) {
+          html.push(htmlSnippet);
+        }
+        if (opensCenteredHtml) {
+          htmlCenter = true;
+        }
+        if (closesCenteredHtml) {
+          htmlCenter = false;
+        }
+        return;
+      }
+
       const heading = line.match(/^(#{1,6})\s+(.+)$/);
       if (heading) {
         flushOpenBlocks();
         const level = Math.min(heading[1].length, 3);
-        html.push(`<h${level}>${renderInline(heading[2].replace(/\s+#+$/, ''))}</h${level}>`);
+        html.push(`<h${level}>${renderInline(heading[2].replace(/\s+#+$/, ''), references)}</h${level}>`);
         return;
       }
 
@@ -297,13 +343,13 @@
       }
 
       if (/^\|(.+)\|\s*$/.test(line) && html.length && html[html.length - 1].startsWith('<table')) {
-        appendTableRow(html, line);
+        appendTableRow(html, line, references);
         return;
       }
 
       if (/^\|(.+)\|\s*$/.test(line)) {
         flushOpenBlocks();
-        html.push(startTable(line));
+        html.push(startTable(line, references));
         return;
       }
 
@@ -342,14 +388,14 @@
     return html.join('');
   }
 
-  function startTable(line) {
+  function startTable(line, references) {
     const cells = splitTableCells(line);
-    return `<table><thead><tr>${cells.map((cell) => `<th>${renderInline(cell)}</th>`).join('')}</tr></thead><tbody></tbody></table>`;
+    return `<table><thead><tr>${cells.map((cell) => `<th>${renderInline(cell, references)}</th>`).join('')}</tr></thead><tbody></tbody></table>`;
   }
 
-  function appendTableRow(html, line) {
+  function appendTableRow(html, line, references) {
     const cells = splitTableCells(line);
-    const row = `<tr>${cells.map((cell) => `<td>${renderInline(cell)}</td>`).join('')}</tr>`;
+    const row = `<tr>${cells.map((cell) => `<td>${renderInline(cell, references)}</td>`).join('')}</tr>`;
     html[html.length - 1] = html[html.length - 1].replace('</tbody>', `${row}</tbody>`);
   }
 
@@ -362,7 +408,74 @@
       .map((cell) => cell.trim());
   }
 
-  function renderInline(value) {
+  function renderAllowedHtmlSnippet(line, forceCentered, references) {
+    if (!/<\/?[a-z][\s\S]*>/i.test(line)) {
+      return null;
+    }
+
+    const images = [...line.matchAll(/<img\b([^>]*)>/gi)]
+      .map((match) => renderHtmlImage(match[1]))
+      .filter(Boolean);
+    const breaks = (line.match(/<br\s*\/?>/gi) || []).map(() => '<br>');
+    const text = stripAllowedHtml(line).trim();
+    const content = [...images, ...breaks, text ? renderInline(text, references) : ''].filter(Boolean).join('');
+
+    if (!content) {
+      return '';
+    }
+
+    return forceCentered ? `<div class="htmlMedia centerMedia">${content}</div>` : `<div class="htmlMedia">${content}</div>`;
+  }
+
+  function renderHtmlImage(attributes) {
+    const src = getHtmlAttribute(attributes, 'src');
+    if (!src || !/^https:\/\//i.test(src)) {
+      return '';
+    }
+
+    const alt = getHtmlAttribute(attributes, 'alt');
+    const width = getHtmlAttribute(attributes, 'width');
+    const widthAttr = /^\d{1,4}$/.test(width) ? ` width="${escapeAttr(width)}"` : '';
+    return `<img src="${escapeAttr(src)}" alt="${escapeAttr(alt)}"${widthAttr}>`;
+  }
+
+  function getHtmlAttribute(attributes, name) {
+    const pattern = new RegExp(`${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i');
+    const match = attributes.match(pattern);
+    return match ? (match[2] || match[3] || match[4] || '') : '';
+  }
+
+  function stripAllowedHtml(value) {
+    return value
+      .replace(/<img\b[^>]*>/gi, '')
+      .replace(/<source\b[^>]*>/gi, '')
+      .replace(/<\/?(div|picture|p|span|br|a|strong|em|b|i|code)\b[^>]*>/gi, '')
+      .replace(/<\/?[a-z][^>]*>/gi, '');
+  }
+
+  function collectMarkdownReferences(source) {
+    const references = {};
+    const pattern = /(?:^|\s)\[([^\]]+)\]:\s*(\S+)/gm;
+    let match;
+    while ((match = pattern.exec(source)) !== null) {
+      references[normalizeReferenceId(match[1])] = match[2];
+    }
+    return references;
+  }
+
+  function isReferenceDefinitionLine(line) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('[')) {
+      return false;
+    }
+    return trimmed.replace(/\[[^\]]+\]:\s*\S+\s*/g, '').trim() === '';
+  }
+
+  function normalizeReferenceId(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function renderInline(value, references) {
     let output = escapeHtml(value);
     const codeSpans = [];
 
@@ -373,6 +486,23 @@
     });
 
     output = output
+      .replace(/\[!\[([^\]]*)\]\[([^\]]+)\]\]\[([^\]]+)\]/g, (match, alt, imageRef, linkRef) => {
+        const imageUrl = references && references[normalizeReferenceId(imageRef)];
+        const linkUrl = references && references[normalizeReferenceId(linkRef)];
+        if (!isSafeImageUrl(imageUrl)) {
+          return match;
+        }
+        const image = `<img class="badgeImage" src="${escapeAttr(imageUrl)}" alt="${escapeAttr(alt)}">`;
+        return isSafeLinkUrl(linkUrl) ? `<a class="badgeLink" href="${escapeAttr(linkUrl)}">${image}</a>` : image;
+      })
+      .replace(/!\[([^\]]*)\]\[([^\]]+)\]/g, (match, alt, imageRef) => {
+        const imageUrl = references && references[normalizeReferenceId(imageRef)];
+        return isSafeImageUrl(imageUrl) ? `<img class="badgeImage" src="${escapeAttr(imageUrl)}" alt="${escapeAttr(alt)}">` : match;
+      })
+      .replace(/\[([^\]]+)\]\[([^\]]+)\]/g, (match, label, linkRef) => {
+        const linkUrl = references && references[normalizeReferenceId(linkRef)];
+        return isSafeLinkUrl(linkUrl) ? `<a href="${escapeAttr(linkUrl)}">${label}</a>` : match;
+      })
       .replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g, '<img src="$2" alt="$1">')
       .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g, '<a href="$2">$1</a>')
       .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
@@ -386,6 +516,14 @@
     });
 
     return output;
+  }
+
+  function isSafeImageUrl(value) {
+    return /^https:\/\//i.test(value || '') || /^data:image\//i.test(value || '');
+  }
+
+  function isSafeLinkUrl(value) {
+    return /^https:\/\//i.test(value || '');
   }
 
   function escapeHtml(value) {

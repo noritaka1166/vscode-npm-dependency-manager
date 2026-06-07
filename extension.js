@@ -55,6 +55,7 @@ class NpmWorkspaceModel {
     this.registryCache = new Map();
     this.dependencyCache = new Map();
     this.auditCache = new Map();
+    this.readmeFallbackCache = new Map();
     this.emitter = new vscode.EventEmitter();
     this.onDidChange = this.emitter.event;
   }
@@ -117,6 +118,8 @@ class NpmWorkspaceModel {
   async enrichDependency(entry, resolvedVersion) {
     const registry = await this.getRegistryPackage(entry.name);
     const versionInfo = resolveVersionInfo(registry, resolvedVersion || entry.currentVersion);
+    const fallbackReadme = registry.readme ? '' : await this.getFallbackReadme(name, registry);
+
     return {
       ...entry,
       resolvedVersion: resolvedVersion || versionInfo.version || '',
@@ -240,8 +243,35 @@ class NpmWorkspaceModel {
       vulnerabilities,
       auditStatus: dependency && dependency.auditStatus ? dependency.auditStatus : (dependency && dependency.resolvedVersion ? 'ok' : 'unknown'),
       auditError: dependency && dependency.auditError ? dependency.auditError : '',
-      readme: registry.readme || 'This package does not publish README content to the npm registry.'
+      maxSeverity: dependency && dependency.maxSeverity ? dependency.maxSeverity : getMaxSeverity(vulnerabilities),
+      readme: registry.readme || fallbackReadme || 'This package does not publish README content to the npm registry.'
     };
+  }
+
+  async getFallbackReadme(name, registry) {
+    if (this.readmeFallbackCache.has(name)) {
+      return this.readmeFallbackCache.get(name);
+    }
+
+    for (const url of getGitHubReadmeCandidates(name, registry)) {
+      try {
+        const response = await fetch(url, { headers: { accept: 'text/plain' } });
+        if (!response.ok) {
+          continue;
+        }
+
+        const text = await response.text();
+        if (text.trim()) {
+          this.readmeFallbackCache.set(name, text);
+          return text;
+        }
+      } catch (error) {
+        continue;
+      }
+    }
+
+    this.readmeFallbackCache.set(name, '');
+    return '';
   }
 
   findKnownDependency(name) {
@@ -692,6 +722,58 @@ function normalizeRepository(repository) {
     return repository;
   }
   return repository.url || '';
+}
+
+function getGitHubReadmeCandidates(packageName, registry) {
+  const github = getGitHubRepoInfo(registry.homepage) || getGitHubRepoInfo(registry.repository);
+  if (!github) {
+    return [];
+  }
+
+  const unscopedName = packageName.split('/').at(-1);
+  const packagePath = packageName.replace(/^@/, '');
+  const paths = [
+    github.path,
+    '',
+    `packages/${unscopedName}`,
+    `packages/${packagePath}`,
+    unscopedName,
+    packagePath
+  ].filter((value, index, list) => value !== undefined && list.indexOf(value) === index);
+
+  const refs = [github.ref, 'main', 'master'].filter((value, index, list) => value && list.indexOf(value) === index);
+  return refs.flatMap((ref) =>
+    paths.flatMap((readmePath) => {
+      const prefix = readmePath ? `${readmePath.replace(/\/$/, '')}/` : '';
+      return [
+        `https://raw.githubusercontent.com/${github.owner}/${github.repo}/${ref}/${prefix}README.md`,
+        `https://raw.githubusercontent.com/${github.owner}/${github.repo}/${ref}/${prefix}readme.md`
+      ];
+    })
+  );
+}
+
+function getGitHubRepoInfo(value) {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = String(value)
+    .replace(/^git\+/, '')
+    .replace(/^git:\/\//, 'https://')
+    .replace(/\.git(#.*)?$/, '$1');
+
+  const match = normalized.match(/^https:\/\/github\.com\/([^/]+)\/([^/#]+)(?:\/(?:tree|blob)\/([^/#]+)(?:\/([^#]+))?)?(?:#.*)?$/i);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    owner: match[1],
+    repo: match[2].replace(/\.git$/, ''),
+    ref: match[3] || 'main',
+    path: match[4] || ''
+  };
 }
 
 async function mapWithConcurrency(items, limit, mapper) {
