@@ -240,7 +240,7 @@
   }
 
   function markdownToHtml(markdown) {
-    const source = String(markdown || '').replace(/\r\n?/g, '\n');
+    const source = stripHtmlComments(String(markdown || '')).replace(/\r\n?/g, '\n');
     const references = collectMarkdownReferences(source);
     const lines = source.split('\n');
     const html = [];
@@ -386,6 +386,10 @@
     flushOpenBlocks();
 
     return html.join('');
+  }
+
+  function stripHtmlComments(value) {
+    return value.replace(/<!--[\s\S]*?-->/g, '');
   }
 
   function startTable(line, references) {
