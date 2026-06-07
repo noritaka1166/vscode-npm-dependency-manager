@@ -46,6 +46,10 @@ class NpmWorkspaceModel {
     this.selectedPackageJson = undefined;
     this.filter = 'all';
     this.dependencies = [];
+    this.dependencyCounts = {
+      dependencies: 0,
+      devDependencies: 0
+    };
     this.message = '';
     this.lockVersions = new Map();
     this.registryCache = new Map();
@@ -97,6 +101,7 @@ class NpmWorkspaceModel {
 
     const packageJson = await readPackageJson(this.selectedPackageJson);
     this.lockVersions = await readLockVersions(this.selectedPackageJson);
+    this.dependencyCounts = getDependencyCounts(packageJson);
     const entries = collectDependencyEntries(packageJson, this.filter);
 
     this.dependencies = await mapWithConcurrency(entries, 8, async (entry) => {
@@ -314,6 +319,7 @@ class NpmWorkspaceModel {
       selectedPackageJson: this.selectedPackageJson,
       selectedLabel: this.getSelectedLabel(),
       filter: this.filter,
+      dependencyCounts: this.dependencyCounts,
       dependencies: this.dependencies,
       message: this.message
     };
@@ -571,6 +577,13 @@ function collectDependencyEntries(packageJson, filter) {
       }))
     )
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function getDependencyCounts(packageJson) {
+  return {
+    dependencies: Object.keys(packageJson.dependencies || {}).length,
+    devDependencies: Object.keys(packageJson.devDependencies || {}).length
+  };
 }
 
 function getVersionStatus(currentRange, latestVersion) {

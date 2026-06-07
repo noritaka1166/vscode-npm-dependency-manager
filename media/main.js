@@ -5,6 +5,10 @@
     packageFiles: [],
     selectedPackageJson: '',
     filter: 'all',
+    dependencyCounts: {
+      dependencies: 0,
+      devDependencies: 0
+    },
     dependencies: []
   };
 
@@ -30,10 +34,7 @@
   });
 
   function renderList() {
-    const counts = {
-      dependencies: state.dependencies.filter((item) => item.type === 'dependencies').length,
-      devDependencies: state.dependencies.filter((item) => item.type === 'devDependencies').length
-    };
+    const counts = state.dependencyCounts || { dependencies: 0, devDependencies: 0 };
 
     app.innerHTML = `
       <section class="toolbar">
