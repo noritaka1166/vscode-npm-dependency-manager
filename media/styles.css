@@ -86,7 +86,7 @@ input {
 
 .row {
   display: grid;
-  grid-template-columns: minmax(116px, 1.4fr) 42px minmax(68px, .8fr) minmax(68px, .8fr) minmax(88px, 1fr);
+  grid-template-columns: minmax(116px, 1.4fr) 42px minmax(68px, .75fr) minmax(104px, .9fr) minmax(68px, .75fr) minmax(104px, .9fr) minmax(86px, .8fr);
   gap: 6px;
   align-items: center;
   min-height: 34px;
@@ -140,6 +140,41 @@ input {
   overflow-wrap: anywhere;
   color: var(--vscode-foreground);
   font-variant-numeric: tabular-nums;
+}
+
+.risk {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.badge {
+  display: inline-block;
+  max-width: 100%;
+  padding: 2px 5px;
+  overflow: hidden;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge.ok {
+  color: var(--vscode-testing-iconPassed);
+  background: color-mix(in srgb, var(--vscode-testing-iconPassed) 16%, transparent);
+}
+
+.badge.deprecated,
+.badge.unknown {
+  color: var(--vscode-testing-iconQueued);
+  background: color-mix(in srgb, var(--vscode-testing-iconQueued) 16%, transparent);
+}
+
+.badge.vulnerable {
+  color: var(--vscode-testing-iconFailed);
+  background: color-mix(in srgb, var(--vscode-testing-iconFailed) 16%, transparent);
 }
 
 small {
@@ -240,6 +275,63 @@ small {
 }
 
 .links a {
+  color: var(--vscode-textLink-foreground);
+}
+
+.security {
+  margin: 14px 0;
+}
+
+.security h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.security.okPanel,
+.notice,
+.advisory {
+  padding: 9px;
+  border: 1px solid var(--vscode-widget-border, transparent);
+  border-radius: 6px;
+  background: var(--vscode-editorWidget-background);
+}
+
+.security.okPanel p,
+.notice p,
+.advisory p {
+  margin: 4px 0 0;
+}
+
+.deprecatedNotice,
+.unknownNotice {
+  border-left: 3px solid var(--vscode-testing-iconQueued);
+}
+
+.advisories {
+  display: grid;
+  gap: 8px;
+}
+
+.advisory {
+  border-left: 3px solid var(--vscode-testing-iconFailed);
+}
+
+.advisory div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.advisory span {
+  color: var(--vscode-testing-iconFailed);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.advisory a {
+  display: inline-block;
+  margin-top: 6px;
   color: var(--vscode-textLink-foreground);
 }
 

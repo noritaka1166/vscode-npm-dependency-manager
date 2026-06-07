@@ -5,7 +5,6 @@
     packageFiles: [],
     selectedPackageJson: '',
     filter: 'all',
-    weeks: 12,
     dependencies: []
   };
 
@@ -26,7 +25,7 @@
     }
 
     if (message.type === 'detail') {
-      renderDetail(message.detail, message.weeks);
+      renderDetail(message.detail);
     }
   });
 
@@ -51,11 +50,6 @@
           ${segment('devDependencies', `dev ${counts.devDependencies}`)}
         </div>
 
-        <label class="field inline">
-          <span>Updated within</span>
-          <input id="weeksInput" type="number" min="1" max="260" step="1" value="${state.weeks}">
-          <span>weeks</span>
-        </label>
       </section>
 
       ${state.message ? `<p class="empty">${escapeHtml(state.message)}</p>` : renderDependencyTable(state.dependencies)}
@@ -73,13 +67,6 @@
         vscode.postMessage({ type: 'setFilter', filter: button.dataset.filter });
       });
     });
-
-    const weeksInput = document.getElementById('weeksInput');
-    if (weeksInput) {
-      weeksInput.addEventListener('change', (event) => {
-        vscode.postMessage({ type: 'setWeeks', weeks: event.target.value });
-      });
-    }
 
     document.querySelectorAll('[data-package]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -99,8 +86,10 @@
           <span>Package</span>
           <span>Type</span>
           <span>Current</span>
+          <span>Current published</span>
           <span>Latest</span>
-          <span>Recent</span>
+          <span>Latest published</span>
+          <span>Risk</span>
         </div>
         ${dependencies.map((dependency) => `
           <div class="row">
@@ -109,15 +98,17 @@
             </button>
             <span class="pill">${dependency.type === 'dependencies' ? 'dep' : 'dev'}</span>
             <span class="version">${escapeHtml(dependency.currentVersion)}</span>
+            <span class="version">${renderDate(dependency.resolvedPublishedAt)}</span>
             <span class="version">${escapeHtml(dependency.latestVersion || '-')}</span>
-            <span class="version">${renderRecent(dependency.recentVersion)}</span>
+            <span class="version">${renderDate(dependency.latestPublishedAt)}</span>
+            <span class="risk">${renderRisk(dependency)}</span>
           </div>
         `).join('')}
       </div>
     `;
   }
 
-  function renderDetail(detail, weeks) {
+  function renderDetail(detail) {
     app.innerHTML = `
       <section class="detailTop">
         <button id="backButton" class="iconButton" title="Back">‹</button>
@@ -128,10 +119,14 @@
       </section>
 
       <section class="meta">
+        ${detail.resolvedVersion ? `<div><span>Resolved</span><strong>${escapeHtml(detail.resolvedVersion)}</strong></div>` : ''}
+        <div><span>Resolved published</span><strong>${renderDate(detail.resolvedPublishedAt)}</strong></div>
         <div><span>Latest</span><strong>${escapeHtml(detail.latestVersion || '-')}</strong></div>
-        <div><span>${weeks} week window</span><strong>${renderRecent(detail.recentVersion)}</strong></div>
+        <div><span>Latest published</span><strong>${renderDate(detail.latestPublishedAt)}</strong></div>
         ${detail.license ? `<div><span>License</span><strong>${escapeHtml(detail.license)}</strong></div>` : ''}
       </section>
+
+      ${renderSecurity(detail)}
 
       <section class="links">
         <a href="${escapeAttr(detail.npmUrl)}">npm</a>
@@ -165,12 +160,59 @@
     return `<button data-filter="${value}" class="${state.filter === value ? 'active' : ''}">${escapeHtml(label)}</button>`;
   }
 
-  function renderRecent(recent) {
-    if (!recent) {
+  function renderDate(value) {
+    if (!value) {
       return '-';
     }
-    const date = new Date(recent.publishedAt);
-    return `${escapeHtml(recent.version)} <small>${date.toLocaleDateString()}</small>`;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return '-';
+    }
+    return `<time datetime="${escapeAttr(value)}">${date.toLocaleDateString()}</time>`;
+  }
+
+  function renderRisk(dependency) {
+    const badges = [];
+    if (dependency.deprecated) {
+      badges.push('<span class="badge deprecated">deprecated</span>');
+    }
+    if (dependency.auditStatus === 'vulnerable') {
+      badges.push(`<span class="badge vulnerable">${escapeHtml(dependency.maxSeverity || 'vuln')}</span>`);
+    }
+    if (dependency.auditStatus === 'unknown') {
+      badges.push('<span class="badge unknown">not checked</span>');
+    }
+    return badges.length ? badges.join('') : '<span class="badge ok">ok</span>';
+  }
+
+  function renderSecurity(detail) {
+    const vulnerabilities = detail.vulnerabilities || [];
+    if (!detail.deprecated && !vulnerabilities.length && detail.auditStatus !== 'unknown') {
+      return '<section class="security okPanel"><h2>Security</h2><p>No deprecation or known vulnerabilities found for the resolved version.</p></section>';
+    }
+
+    return `
+      <section class="security">
+        <h2>Security</h2>
+        ${detail.deprecated ? `<div class="notice deprecatedNotice"><strong>Deprecated</strong><p>${escapeHtml(detail.deprecatedMessage || 'This package version is deprecated.')}</p></div>` : ''}
+        ${detail.auditStatus === 'unknown' ? `<div class="notice unknownNotice"><strong>Vulnerabilities not checked</strong><p>${escapeHtml(detail.auditError || 'A resolved version was not available. Add or update package-lock.json for more accurate audit results.')}</p></div>` : ''}
+        ${vulnerabilities.length ? `
+          <div class="advisories">
+            ${vulnerabilities.map((advisory) => `
+              <article class="advisory ${escapeAttr(advisory.severity || 'unknown')}">
+                <div>
+                  <strong>${escapeHtml(advisory.title)}</strong>
+                  <span>${escapeHtml(advisory.severity || 'unknown')}</span>
+                </div>
+                ${advisory.vulnerableVersions ? `<p>Vulnerable: ${escapeHtml(advisory.vulnerableVersions)}</p>` : ''}
+                ${advisory.patchedVersions ? `<p>Patched: ${escapeHtml(advisory.patchedVersions)}</p>` : ''}
+                ${advisory.url ? `<a href="${escapeAttr(advisory.url)}">Advisory</a>` : ''}
+              </article>
+            `).join('')}
+          </div>
+        ` : ''}
+      </section>
+    `;
   }
 
   function markdownToHtml(markdown) {

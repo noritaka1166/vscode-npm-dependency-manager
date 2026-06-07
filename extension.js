@@ -1,8 +1,10 @@
 const vscode = require('vscode');
+const path = require('path');
 
 const VIEW_ID = 'workspaceNpmSidebar.dependenciesView';
 const PANEL_TYPE = 'workspaceNpmSidebar.dashboard';
 const REGISTRY_BASE_URL = 'https://registry.npmjs.org';
+const AUDIT_BULK_URL = `${REGISTRY_BASE_URL}/-/npm/v1/security/advisories/bulk`;
 
 function activate(context) {
   const model = new NpmWorkspaceModel();
@@ -28,7 +30,7 @@ function activate(context) {
     }),
     vscode.commands.registerCommand('workspaceNpmSidebar.openPackage', async (dependency) => {
       if (dependency && dependency.name) {
-        await panel.showPackage(dependency.name);
+        await panel.showPackage(dependency.name, dependency);
       }
     })
   );
@@ -43,11 +45,12 @@ class NpmWorkspaceModel {
     this.packageFiles = [];
     this.selectedPackageJson = undefined;
     this.filter = 'all';
-    this.weeks = 12;
     this.dependencies = [];
     this.message = '';
+    this.lockVersions = new Map();
     this.registryCache = new Map();
     this.dependencyCache = new Map();
+    this.auditCache = new Map();
     this.emitter = new vscode.EventEmitter();
     this.onDidChange = this.emitter.event;
   }
@@ -83,11 +86,6 @@ class NpmWorkspaceModel {
     await this.loadDependencies();
   }
 
-  async setWeeks(weeks) {
-    this.weeks = normalizeWeeks(weeks);
-    await this.loadDependencies();
-  }
-
   async loadDependencies() {
     if (!this.selectedPackageJson) {
       await this.refresh();
@@ -98,48 +96,162 @@ class NpmWorkspaceModel {
     this.emit();
 
     const packageJson = await readPackageJson(this.selectedPackageJson);
+    this.lockVersions = await readLockVersions(this.selectedPackageJson);
     const entries = collectDependencyEntries(packageJson, this.filter);
 
     this.dependencies = await mapWithConcurrency(entries, 8, async (entry) => {
-      const registry = await this.getRegistryPackage(entry.name);
-      return {
-        ...entry,
-        latestVersion: registry.latestVersion,
-        recentVersion: getLatestVersionWithinWeeks(registry.time, this.weeks),
-        description: registry.description,
-        npmUrl: `https://www.npmjs.com/package/${entry.name}`,
-        status: getVersionStatus(entry.currentVersion, registry.latestVersion)
-      };
+      return this.enrichDependency(entry, this.lockVersions.get(entry.name));
     });
+
+    await this.attachAuditInfo(this.dependencies);
 
     this.message = '';
     this.emit();
   }
 
-  async getDetail(name) {
+  async enrichDependency(entry, resolvedVersion) {
+    const registry = await this.getRegistryPackage(entry.name);
+    const versionInfo = resolveVersionInfo(registry, resolvedVersion || entry.currentVersion);
+    return {
+      ...entry,
+      resolvedVersion: resolvedVersion || versionInfo.version || '',
+      latestVersion: registry.latestVersion,
+      resolvedPublishedAt: getPublishedAt(registry.time, resolvedVersion || versionInfo.version),
+      latestPublishedAt: getPublishedAt(registry.time, registry.latestVersion),
+      description: registry.description,
+      npmUrl: `https://www.npmjs.com/package/${entry.name}`,
+      status: getVersionStatus(entry.currentVersion, registry.latestVersion),
+      deprecated: Boolean(versionInfo.manifest && versionInfo.manifest.deprecated),
+      deprecatedMessage: versionInfo.manifest && versionInfo.manifest.deprecated ? versionInfo.manifest.deprecated : ''
+    };
+  }
+
+  async attachAuditInfo(dependencies) {
+    const auditInput = {};
+    dependencies.forEach((dependency) => {
+      if (!dependency.resolvedVersion) {
+        dependency.auditStatus = 'unknown';
+        dependency.vulnerabilities = [];
+        return;
+      }
+
+      if (!auditInput[dependency.name]) {
+        auditInput[dependency.name] = [];
+      }
+      auditInput[dependency.name].push(dependency.resolvedVersion);
+    });
+
+    const auditResult = await this.getAuditAdvisories(auditInput);
+    dependencies.forEach((dependency) => {
+      if (!dependency.resolvedVersion) {
+        return;
+      }
+
+      dependency.vulnerabilities = auditResult.get(dependency.name) || [];
+      if (dependency.vulnerabilities.every((advisory) => advisory.auditError)) {
+        dependency.auditStatus = 'unknown';
+        dependency.auditError = dependency.vulnerabilities[0] && dependency.vulnerabilities[0].title;
+        dependency.vulnerabilities = [];
+        return;
+      }
+      dependency.auditStatus = dependency.vulnerabilities.length ? 'vulnerable' : 'ok';
+      dependency.maxSeverity = getMaxSeverity(dependency.vulnerabilities);
+    });
+  }
+
+  async getAuditAdvisories(packageVersions) {
+    const normalized = {};
+    Object.entries(packageVersions).forEach(([name, versions]) => {
+      const uniqueVersions = [...new Set(versions.filter(Boolean))];
+      if (uniqueVersions.length) {
+        normalized[name] = uniqueVersions;
+      }
+    });
+
+    const cacheKey = JSON.stringify(normalized);
+    if (this.auditCache.has(cacheKey)) {
+      return this.auditCache.get(cacheKey);
+    }
+
+    const result = new Map();
+    if (!Object.keys(normalized).length) {
+      this.auditCache.set(cacheKey, result);
+      return result;
+    }
+
+    try {
+      const response = await fetch(AUDIT_BULK_URL, {
+        method: 'POST',
+        headers: {
+          accept: 'application/json',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify(normalized)
+      });
+
+      if (!response.ok) {
+        throw new Error(`npm audit returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      Object.entries(data || {}).forEach(([name, advisories]) => {
+        result.set(name, Array.isArray(advisories) ? advisories.map(normalizeAdvisory) : []);
+      });
+    } catch (error) {
+      Object.keys(normalized).forEach((name) => {
+        result.set(name, [{
+          title: getErrorMessage(error),
+          severity: 'unknown',
+          url: '',
+          vulnerableVersions: '',
+          auditError: true
+        }]);
+      });
+    }
+
+    this.auditCache.set(cacheKey, result);
+    return result;
+  }
+
+  async getDetail(name, dependencyHint) {
     const registry = await this.getRegistryPackage(name);
+    const dependency = dependencyHint || this.findKnownDependency(name);
+    const versionInfo = resolveVersionInfo(registry, dependency && (dependency.resolvedVersion || dependency.currentVersion));
+    const vulnerabilities = dependency && dependency.vulnerabilities ? dependency.vulnerabilities : [];
+
     return {
       name,
       description: registry.description,
       latestVersion: registry.latestVersion,
-      recentVersion: getLatestVersionWithinWeeks(registry.time, this.weeks),
+      resolvedVersion: dependency && dependency.resolvedVersion ? dependency.resolvedVersion : versionInfo.version,
+      resolvedPublishedAt: getPublishedAt(registry.time, dependency && dependency.resolvedVersion ? dependency.resolvedVersion : versionInfo.version),
+      latestPublishedAt: getPublishedAt(registry.time, registry.latestVersion),
       npmUrl: `https://www.npmjs.com/package/${name}`,
       homepage: registry.homepage,
       repository: registry.repository,
       license: registry.license,
+      deprecated: Boolean(versionInfo.manifest && versionInfo.manifest.deprecated),
+      deprecatedMessage: versionInfo.manifest && versionInfo.manifest.deprecated ? versionInfo.manifest.deprecated : '',
+      vulnerabilities,
+      auditStatus: dependency && dependency.auditStatus ? dependency.auditStatus : (dependency && dependency.resolvedVersion ? 'ok' : 'unknown'),
+      auditError: dependency && dependency.auditError ? dependency.auditError : '',
       readme: registry.readme || 'This package does not publish README content to the npm registry.'
     };
   }
 
+  findKnownDependency(name) {
+    return this.dependencies.find((dependency) => dependency.name === name);
+  }
+
   async getPackageDependencies(dependency, ancestry) {
-    const cacheKey = `${dependency.name}@${dependency.currentVersion || 'latest'}`;
+    const cacheKey = `${dependency.name}@${dependency.resolvedVersion || dependency.currentVersion || 'latest'}`;
     const cached = this.dependencyCache.get(cacheKey);
     if (cached) {
       return cached;
     }
 
     const registry = await this.getRegistryPackage(dependency.name);
-    const versionInfo = resolveVersionInfo(registry, dependency.currentVersion);
+    const versionInfo = resolveVersionInfo(registry, dependency.resolvedVersion || dependency.currentVersion);
     const dependencies = versionInfo.manifest && versionInfo.manifest.dependencies ? versionInfo.manifest.dependencies : {};
     const entries = Object.entries(dependencies)
       .map(([name, currentVersion]) => ({
@@ -151,16 +263,10 @@ class NpmWorkspaceModel {
       .sort((a, b) => a.name.localeCompare(b.name));
 
     const result = await mapWithConcurrency(entries, 8, async (entry) => {
-      const childRegistry = await this.getRegistryPackage(entry.name);
-      return {
-        ...entry,
-        latestVersion: childRegistry.latestVersion,
-        recentVersion: getLatestVersionWithinWeeks(childRegistry.time, this.weeks),
-        description: childRegistry.description,
-        npmUrl: `https://www.npmjs.com/package/${entry.name}`,
-        status: getVersionStatus(entry.currentVersion, childRegistry.latestVersion)
-      };
+      return this.enrichDependency(entry, undefined);
     });
+
+    await this.attachAuditInfo(result);
 
     this.dependencyCache.set(cacheKey, result);
     return result;
@@ -208,7 +314,6 @@ class NpmWorkspaceModel {
       selectedPackageJson: this.selectedPackageJson,
       selectedLabel: this.getSelectedLabel(),
       filter: this.filter,
-      weeks: this.weeks,
       dependencies: this.dependencies,
       message: this.message
     };
@@ -274,15 +379,15 @@ class DependencyTreeItem extends vscode.TreeItem {
     super(dependency.name, vscode.TreeItemCollapsibleState.Collapsed);
     this.dependency = dependency;
     this.ancestry = ancestry;
-    this.description = dependency.currentVersion;
-    this.tooltip = `${dependency.name}\n${dependency.type}\nRequired: ${dependency.currentVersion}\nLatest: ${dependency.latestVersion || '-'}`;
+    this.description = getTreeDescription(dependency);
+    this.tooltip = getTreeTooltip(dependency);
     this.contextValue = 'dependency';
     this.command = {
       command: 'workspaceNpmSidebar.openPackage',
       title: 'Open Package',
       arguments: [dependency]
     };
-    this.iconPath = new vscode.ThemeIcon(dependency.type === 'dependencies' ? 'package' : 'tools');
+    this.iconPath = getDependencyIcon(dependency);
   }
 }
 
@@ -335,9 +440,6 @@ class DashboardPanel {
           case 'setFilter':
             await this.model.setFilter(message.filter);
             break;
-          case 'setWeeks':
-            await this.model.setWeeks(message.weeks);
-            break;
           case 'openPackage':
             await this.showPackage(message.name);
             break;
@@ -353,11 +455,11 @@ class DashboardPanel {
     this.update();
   }
 
-  async showPackage(name) {
+  async showPackage(name, dependency) {
     this.show();
     this.post({ type: 'loading', message: `Loading ${name}...` });
-    const detail = await this.model.getDetail(name);
-    this.post({ type: 'detail', detail, weeks: this.model.weeks });
+    const detail = await this.model.getDetail(name, dependency);
+    this.post({ type: 'detail', detail });
   }
 
   update() {
@@ -412,6 +514,47 @@ async function readPackageJson(fsPath) {
   return JSON.parse(Buffer.from(bytes).toString('utf8'));
 }
 
+async function readLockVersions(packageJsonPath) {
+  const lockPath = path.join(path.dirname(packageJsonPath), 'package-lock.json');
+  const versions = new Map();
+
+  try {
+    const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(lockPath));
+    const lock = JSON.parse(Buffer.from(bytes).toString('utf8'));
+
+    if (lock.packages) {
+      Object.entries(lock.packages).forEach(([packagePath, info]) => {
+        if (!packagePath.startsWith('node_modules/') || !info || !info.version) {
+          return;
+        }
+
+        const name = packagePath.split('node_modules/').at(-1);
+        versions.set(name, info.version);
+      });
+      return versions;
+    }
+
+    if (lock.dependencies) {
+      collectLockDependencyVersions(lock.dependencies, versions);
+    }
+  } catch (error) {
+    return versions;
+  }
+
+  return versions;
+}
+
+function collectLockDependencyVersions(dependencies, versions) {
+  Object.entries(dependencies || {}).forEach(([name, info]) => {
+    if (info && info.version) {
+      versions.set(name, info.version);
+    }
+    if (info && info.dependencies) {
+      collectLockDependencyVersions(info.dependencies, versions);
+    }
+  });
+}
+
 function collectDependencyEntries(packageJson, filter) {
   const groups = [
     ['dependencies', packageJson.dependencies || {}],
@@ -430,17 +573,6 @@ function collectDependencyEntries(packageJson, filter) {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function getLatestVersionWithinWeeks(timeMap, weeks) {
-  const now = Date.now();
-  const threshold = now - weeks * 7 * 24 * 60 * 60 * 1000;
-
-  return Object.entries(timeMap || {})
-    .filter(([version, publishedAt]) => version !== 'created' && version !== 'modified' && Date.parse(publishedAt) >= threshold)
-    .sort((a, b) => Date.parse(b[1]) - Date.parse(a[1]))
-    .map(([version, publishedAt]) => ({ version, publishedAt }))
-    .at(0) || null;
-}
-
 function getVersionStatus(currentRange, latestVersion) {
   const current = String(currentRange || '').replace(/^[~^<>=\s]+/, '');
   if (!latestVersion) {
@@ -450,6 +582,74 @@ function getVersionStatus(currentRange, latestVersion) {
     return 'current';
   }
   return 'update';
+}
+
+function getPublishedAt(timeMap, version) {
+  if (!timeMap || !version || !timeMap[version]) {
+    return '';
+  }
+  return timeMap[version];
+}
+
+function normalizeAdvisory(advisory) {
+  return {
+    title: advisory.title || advisory.name || 'Security advisory',
+    severity: advisory.severity || 'unknown',
+    url: advisory.url || advisory.source || '',
+    vulnerableVersions: advisory.vulnerable_versions || advisory.vulnerableVersions || advisory.range || '',
+    patchedVersions: advisory.patched_versions || advisory.patchedVersions || ''
+  };
+}
+
+function getMaxSeverity(vulnerabilities) {
+  const order = ['info', 'low', 'moderate', 'high', 'critical'];
+  return (vulnerabilities || []).reduce((max, vulnerability) => {
+    const severity = vulnerability.severity || 'unknown';
+    return order.indexOf(severity) > order.indexOf(max) ? severity : max;
+  }, 'info');
+}
+
+function getTreeDescription(dependency) {
+  const flags = [];
+  if (dependency.deprecated) {
+    flags.push('deprecated');
+  }
+  if (dependency.auditStatus === 'vulnerable') {
+    flags.push(dependency.maxSeverity || 'vulnerable');
+  }
+  return flags.length ? `${dependency.currentVersion}  ${flags.join(', ')}` : dependency.currentVersion;
+}
+
+function getTreeTooltip(dependency) {
+  const lines = [
+    dependency.name,
+    dependency.type,
+    `Required: ${dependency.currentVersion}`,
+    `Resolved: ${dependency.resolvedVersion || '-'}`,
+    `Latest: ${dependency.latestVersion || '-'}`
+  ];
+
+  if (dependency.deprecated) {
+    lines.push(`Deprecated: ${dependency.deprecatedMessage || 'yes'}`);
+  }
+  if (dependency.auditStatus === 'vulnerable') {
+    lines.push(`Vulnerabilities: ${dependency.vulnerabilities.length}`);
+  }
+  if (dependency.auditStatus === 'unknown') {
+    lines.push('Vulnerabilities: not checked');
+  }
+
+  return lines.join('\n');
+}
+
+function getDependencyIcon(dependency) {
+  if (dependency.auditStatus === 'vulnerable') {
+    return new vscode.ThemeIcon('warning', new vscode.ThemeColor('testing.iconFailed'));
+  }
+  if (dependency.deprecated) {
+    return new vscode.ThemeIcon('warning', new vscode.ThemeColor('testing.iconQueued'));
+  }
+  return new vscode.ThemeIcon(dependency.type === 'dependencies' ? 'package' : 'tools');
 }
 
 function resolveVersionInfo(registry, requestedRange) {
@@ -469,14 +669,6 @@ function resolveVersionInfo(registry, requestedRange) {
     version: fallbackVersion || '',
     manifest: fallbackVersion ? versions[fallbackVersion] : {}
   };
-}
-
-function normalizeWeeks(value) {
-  const number = Number.parseInt(value, 10);
-  if (!Number.isFinite(number) || number < 1) {
-    return 1;
-  }
-  return Math.min(number, 260);
 }
 
 function normalizeRepository(repository) {
@@ -503,7 +695,8 @@ async function mapWithConcurrency(items, limit, mapper) {
         results[index] = {
           ...items[index],
           latestVersion: '',
-          recentVersion: null,
+          resolvedPublishedAt: '',
+          latestPublishedAt: '',
           description: getErrorMessage(error),
           npmUrl: `https://www.npmjs.com/package/${items[index].name}`,
           status: 'unknown'

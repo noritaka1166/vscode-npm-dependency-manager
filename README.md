@@ -11,7 +11,9 @@ VS Code sidebar extension for browsing dependencies from workspace `package.json
 - Lets you select a target `package.json` from the dashboard dropdown.
 - Lists `dependencies` and `devDependencies` in the dashboard.
 - Filters by dependency type.
-- Shows the installed version range, npm latest version, and the newest version published within a configurable week window.
+- Shows the installed version range, its publish date, the npm latest version, and the latest version publish date.
+- Flags deprecated package versions from npm registry metadata.
+- Checks known vulnerabilities with npm audit bulk advisories when a resolved version is available.
 - Opens a package detail view in the main editor with npm registry README content and package metadata.
 
 ## Run locally
@@ -20,4 +22,4 @@ VS Code sidebar extension for browsing dependencies from workspace `package.json
 2. Press `F5` and run the `Run Extension` launch configuration.
 3. In the Extension Development Host window, open the `npm Packages` activity bar view.
 
-The extension reads npm registry metadata directly from `https://registry.npmjs.org`.
+The extension reads npm registry metadata directly from `https://registry.npmjs.org`. Vulnerability checks are most accurate when a `package-lock.json` exists next to the selected `package.json`.
