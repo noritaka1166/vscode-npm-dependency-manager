@@ -64,6 +64,10 @@ input {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
+.segments.updateSegments {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
 .segments button {
   min-height: 28px;
   color: var(--vscode-button-secondaryForeground);

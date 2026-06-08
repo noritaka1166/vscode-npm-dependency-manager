@@ -6,6 +6,7 @@
     selectedPackageJson: '',
     filter: 'all',
     riskFilter: 'all',
+    updateFilter: 'all',
     searchQuery: '',
     dependencyCounts: {
       dependencies: 0,
@@ -68,6 +69,15 @@
           ${riskSegment('ok', 'OK')}
         </div>
 
+        <div class="segments updateSegments" role="group" aria-label="Update">
+          ${updateSegment('all', 'All updates')}
+          ${updateSegment('update', 'Updates')}
+          ${updateSegment('major', 'Major')}
+          ${updateSegment('minor', 'Minor')}
+          ${updateSegment('patch', 'Patch')}
+          ${updateSegment('current', 'Current')}
+        </div>
+
         <label class="field">
           <span>Search packages</span>
           <input id="searchInput" type="search" value="${escapeAttr(state.searchQuery || '')}" placeholder="Package name">
@@ -100,6 +110,15 @@
         updateRiskSegments();
         updateDependencyTable();
         vscode.postMessage({ type: 'setRiskFilter', filter: button.dataset.riskFilter });
+      });
+    });
+
+    document.querySelectorAll('[data-update-filter]').forEach((button) => {
+      button.addEventListener('click', () => {
+        state.updateFilter = button.dataset.updateFilter;
+        updateUpdateSegments();
+        updateDependencyTable();
+        vscode.postMessage({ type: 'setUpdateFilter', filter: button.dataset.updateFilter });
       });
     });
 
@@ -139,12 +158,12 @@
 
   function getVisibleDependencies() {
     const query = String(state.searchQuery || '').trim().toLowerCase();
-    const riskFiltered = filterByRisk(state.dependencies, state.riskFilter);
+    const filtered = filterByUpdate(filterByRisk(state.dependencies, state.riskFilter), state.updateFilter);
     if (!query) {
-      return riskFiltered;
+      return filtered;
     }
 
-    return riskFiltered.filter((dependency) => {
+    return filtered.filter((dependency) => {
       return dependency.name.toLowerCase().includes(query) || String(dependency.description || '').toLowerCase().includes(query);
     });
   }
@@ -168,6 +187,19 @@
         return !dependency.deprecated && dependency.auditStatus !== 'vulnerable' && dependency.auditStatus !== 'unknown';
       }
       return true;
+    });
+  }
+
+  function filterByUpdate(dependencies, updateFilter) {
+    if (!updateFilter || updateFilter === 'all') {
+      return dependencies;
+    }
+
+    return dependencies.filter((dependency) => {
+      if (updateFilter === 'update') {
+        return ['major', 'minor', 'patch'].includes(dependency.updateType);
+      }
+      return dependency.updateType === updateFilter;
     });
   }
 
@@ -354,9 +386,19 @@
     return `<button data-risk-filter="${value}" class="${state.riskFilter === value ? 'active' : ''}">${escapeHtml(label)}</button>`;
   }
 
+  function updateSegment(value, label) {
+    return `<button data-update-filter="${value}" class="${state.updateFilter === value ? 'active' : ''}">${escapeHtml(label)}</button>`;
+  }
+
   function updateRiskSegments() {
     document.querySelectorAll('[data-risk-filter]').forEach((button) => {
       button.classList.toggle('active', button.dataset.riskFilter === state.riskFilter);
+    });
+  }
+
+  function updateUpdateSegments() {
+    document.querySelectorAll('[data-update-filter]').forEach((button) => {
+      button.classList.toggle('active', button.dataset.updateFilter === state.updateFilter);
     });
   }
 

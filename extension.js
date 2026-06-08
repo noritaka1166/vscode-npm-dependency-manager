@@ -64,6 +64,7 @@ class NpmWorkspaceModel {
     this.selectedPackageJson = undefined;
     this.filter = 'all';
     this.riskFilter = 'all';
+    this.updateFilter = 'all';
     this.searchQuery = '';
     this.dependencies = [];
     this.allDependencies = [];
@@ -124,6 +125,11 @@ class NpmWorkspaceModel {
     this.applyDependencyView(true, 'risk');
   }
 
+  async setUpdateFilter(filter) {
+    this.updateFilter = filter || 'all';
+    this.applyDependencyView(true, 'update');
+  }
+
   async loadDependencies() {
     if (!this.selectedPackageJson) {
       await this.refresh();
@@ -151,7 +157,7 @@ class NpmWorkspaceModel {
 
   applyDependencyView(emit = true, reason = 'state') {
     this.dependencies = filterDependencyEntries(
-      filterDependencyRisk(filterDependencyType(this.allDependencies, this.filter), this.riskFilter),
+      filterDependencyUpdate(filterDependencyRisk(filterDependencyType(this.allDependencies, this.filter), this.riskFilter), this.updateFilter),
       this.searchQuery
     );
 
@@ -469,6 +475,7 @@ class NpmWorkspaceModel {
       selectedLabel: this.getSelectedLabel(),
       filter: this.filter,
       riskFilter: this.riskFilter,
+      updateFilter: this.updateFilter,
       searchQuery: this.searchQuery,
       dependencyCounts: this.dependencyCounts,
       lockInfo: {
@@ -613,6 +620,9 @@ class DashboardPanel {
             break;
           case 'setRiskFilter':
             await this.model.setRiskFilter(message.filter);
+            break;
+          case 'setUpdateFilter':
+            await this.model.setUpdateFilter(message.filter);
             break;
           case 'openPackage':
             await this.showPackage(message.name);
@@ -841,6 +851,19 @@ function filterDependencyRisk(entries, filter) {
       return !entry.deprecated && entry.auditStatus !== 'vulnerable' && entry.auditStatus !== 'unknown';
     }
     return true;
+  });
+}
+
+function filterDependencyUpdate(entries, filter) {
+  if (!filter || filter === 'all') {
+    return entries;
+  }
+
+  return entries.filter((entry) => {
+    if (filter === 'update') {
+      return ['major', 'minor', 'patch'].includes(entry.updateType);
+    }
+    return entry.updateType === filter;
   });
 }
 
