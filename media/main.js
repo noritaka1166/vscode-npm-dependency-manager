@@ -146,6 +146,13 @@
               </dl>
             </section>
 
+            <section class="sideSection">
+              <h2>Downloads</h2>
+              <dl class="facts">
+                <div><dt>Weekly downloads</dt><dd>${formatNumber(detail.weeklyDownloads)}</dd></div>
+              </dl>
+            </section>
+
             ${renderSecurity(detail)}
 
             <section class="sideSection">
@@ -207,6 +214,13 @@
       badges.push('<span class="badge unknown">not checked</span>');
     }
     return badges.length ? badges.join('') : '<span class="badge ok">ok</span>';
+  }
+
+  function formatNumber(value) {
+    if (!Number.isFinite(value)) {
+      return '-';
+    }
+    return value.toLocaleString();
   }
 
   function renderSecurity(detail) {

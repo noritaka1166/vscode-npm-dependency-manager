@@ -5,6 +5,7 @@ const VIEW_ID = 'workspaceNpmSidebar.dependenciesView';
 const PANEL_TYPE = 'workspaceNpmSidebar.dashboard';
 const REGISTRY_BASE_URL = 'https://registry.npmjs.org';
 const AUDIT_BULK_URL = `${REGISTRY_BASE_URL}/-/npm/v1/security/advisories/bulk`;
+const DOWNLOADS_API_BASE_URL = 'https://api.npmjs.org/downloads/point/last-week';
 
 function activate(context) {
   const model = new NpmWorkspaceModel();
@@ -56,6 +57,7 @@ class NpmWorkspaceModel {
     this.dependencyCache = new Map();
     this.auditCache = new Map();
     this.readmeFallbackCache = new Map();
+    this.downloadCache = new Map();
     this.emitter = new vscode.EventEmitter();
     this.onDidChange = this.emitter.event;
   }
@@ -118,7 +120,6 @@ class NpmWorkspaceModel {
   async enrichDependency(entry, resolvedVersion) {
     const registry = await this.getRegistryPackage(entry.name);
     const versionInfo = resolveVersionInfo(registry, resolvedVersion || entry.currentVersion);
-    const fallbackReadme = registry.readme ? '' : await this.getFallbackReadme(name, registry);
 
     return {
       ...entry,
@@ -226,6 +227,8 @@ class NpmWorkspaceModel {
     const dependency = dependencyHint || this.findKnownDependency(name);
     const versionInfo = resolveVersionInfo(registry, dependency && (dependency.resolvedVersion || dependency.currentVersion));
     const vulnerabilities = dependency && dependency.vulnerabilities ? dependency.vulnerabilities : [];
+    const fallbackReadme = registry.readme ? '' : await this.getFallbackReadme(name, registry);
+    const weeklyDownloads = await this.getWeeklyDownloads(name);
 
     return {
       name,
@@ -244,8 +247,32 @@ class NpmWorkspaceModel {
       auditStatus: dependency && dependency.auditStatus ? dependency.auditStatus : (dependency && dependency.resolvedVersion ? 'ok' : 'unknown'),
       auditError: dependency && dependency.auditError ? dependency.auditError : '',
       maxSeverity: dependency && dependency.maxSeverity ? dependency.maxSeverity : getMaxSeverity(vulnerabilities),
+      weeklyDownloads,
       readme: registry.readme || fallbackReadme || 'This package does not publish README content to the npm registry.'
     };
+  }
+
+  async getWeeklyDownloads(name) {
+    if (this.downloadCache.has(name)) {
+      return this.downloadCache.get(name);
+    }
+
+    try {
+      const response = await fetch(`${DOWNLOADS_API_BASE_URL}/${encodeURIComponent(name)}`, {
+        headers: { accept: 'application/json' }
+      });
+      if (!response.ok) {
+        throw new Error(`npm downloads returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      const downloads = Number.isFinite(data.downloads) ? data.downloads : null;
+      this.downloadCache.set(name, downloads);
+      return downloads;
+    } catch (error) {
+      this.downloadCache.set(name, null);
+      return null;
+    }
   }
 
   async getFallbackReadme(name, registry) {
