@@ -5,6 +5,7 @@
     packageFiles: [],
     selectedPackageJson: '',
     filter: 'all',
+    searchQuery: '',
     dependencyCounts: {
       dependencies: 0,
       devDependencies: 0
@@ -51,6 +52,10 @@
           ${segment('devDependencies', `dev ${counts.devDependencies}`)}
         </div>
 
+        <label class="field">
+          <span>Search packages</span>
+          <input id="searchInput" type="search" value="${escapeAttr(state.searchQuery || '')}" placeholder="Package name">
+        </label>
       </section>
 
       ${state.message ? `<p class="empty">${escapeHtml(state.message)}</p>` : renderDependencyTable(state.dependencies)}
@@ -69,6 +74,17 @@
       });
     });
 
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+      let searchTimer;
+      searchInput.addEventListener('input', (event) => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => {
+          vscode.postMessage({ type: 'setSearchQuery', query: event.target.value });
+        }, 180);
+      });
+    }
+
     document.querySelectorAll('[data-package]').forEach((button) => {
       button.addEventListener('click', () => {
         vscode.postMessage({ type: 'openPackage', name: button.dataset.package });
@@ -78,7 +94,7 @@
 
   function renderDependencyTable(dependencies) {
     if (!dependencies.length) {
-      return '<p class="empty">No dependencies match this filter.</p>';
+      return '<p class="empty">No packages match this filter or search.</p>';
     }
 
     return `

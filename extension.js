@@ -46,6 +46,7 @@ class NpmWorkspaceModel {
     this.packageFiles = [];
     this.selectedPackageJson = undefined;
     this.filter = 'all';
+    this.searchQuery = '';
     this.dependencies = [];
     this.dependencyCounts = {
       dependencies: 0,
@@ -93,6 +94,11 @@ class NpmWorkspaceModel {
     await this.loadDependencies();
   }
 
+  async setSearchQuery(query) {
+    this.searchQuery = String(query || '');
+    await this.loadDependencies();
+  }
+
   async loadDependencies() {
     if (!this.selectedPackageJson) {
       await this.refresh();
@@ -105,7 +111,7 @@ class NpmWorkspaceModel {
     const packageJson = await readPackageJson(this.selectedPackageJson);
     this.lockVersions = await readLockVersions(this.selectedPackageJson);
     this.dependencyCounts = getDependencyCounts(packageJson);
-    const entries = collectDependencyEntries(packageJson, this.filter);
+    const entries = filterDependencyEntries(collectDependencyEntries(packageJson, this.filter), this.searchQuery);
 
     this.dependencies = await mapWithConcurrency(entries, 8, async (entry) => {
       return this.enrichDependency(entry, this.lockVersions.get(entry.name));
@@ -376,6 +382,7 @@ class NpmWorkspaceModel {
       selectedPackageJson: this.selectedPackageJson,
       selectedLabel: this.getSelectedLabel(),
       filter: this.filter,
+      searchQuery: this.searchQuery,
       dependencyCounts: this.dependencyCounts,
       dependencies: this.dependencies,
       message: this.message
@@ -409,7 +416,10 @@ class DependenciesTreeProvider {
       }
 
       try {
-        const dependencies = await this.model.getPackageDependencies(item.dependency, item.ancestry);
+        const dependencies = filterDependencyEntries(
+          await this.model.getPackageDependencies(item.dependency, item.ancestry),
+          this.model.searchQuery
+        );
         if (!dependencies.length) {
           return [new MessageTreeItem('No dependencies')];
         }
@@ -430,7 +440,7 @@ class DependenciesTreeProvider {
     }
 
     if (!this.model.dependencies.length) {
-      return [new MessageTreeItem('No dependencies found')];
+      return [new MessageTreeItem(this.model.searchQuery ? 'No packages match search' : 'No dependencies found')];
     }
 
     return this.model.dependencies.map((dependency) => new DependencyTreeItem(dependency, []));
@@ -502,6 +512,9 @@ class DashboardPanel {
             break;
           case 'setFilter':
             await this.model.setFilter(message.filter);
+            break;
+          case 'setSearchQuery':
+            await this.model.setSearchQuery(message.query);
             break;
           case 'openPackage':
             await this.showPackage(message.name);
@@ -646,6 +659,17 @@ function collectDependencyEntries(packageJson, filter) {
       }))
     )
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function filterDependencyEntries(entries, searchQuery) {
+  const query = String(searchQuery || '').trim().toLowerCase();
+  if (!query) {
+    return entries;
+  }
+
+  return entries.filter((entry) => {
+    return entry.name.toLowerCase().includes(query) || String(entry.description || '').toLowerCase().includes(query);
+  });
 }
 
 function getDependencyCounts(packageJson) {
