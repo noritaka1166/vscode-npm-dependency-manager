@@ -266,6 +266,8 @@
               </dl>
             </section>
 
+            ${renderNpmMetadata(detail)}
+
             ${renderSecurity(detail)}
 
             <section class="sideSection">
@@ -379,6 +381,28 @@
       flags.push('peer');
     }
     return flags.length ? `<div><dt>Flags</dt><dd>${flags.map((flag) => `<span class="lockFlag">${escapeHtml(flag)}</span>`).join('')}</dd></div>` : '';
+  }
+
+  function renderNpmMetadata(detail) {
+    const distTags = Object.entries(detail.distTags || {});
+    const maintainers = detail.maintainers || [];
+    const keywords = detail.keywords || [];
+
+    return `
+      <section class="sideSection npmMetadata">
+        <h2>npm Metadata</h2>
+        <dl class="facts">
+          ${detail.publisher ? `<div><dt>Publisher</dt><dd>${escapeHtml(detail.publisher)}</dd></div>` : ''}
+          ${detail.author ? `<div><dt>Author</dt><dd>${escapeHtml(detail.author)}</dd></div>` : ''}
+          ${maintainers.length ? `<div><dt>Maintainers</dt><dd>${maintainers.slice(0, 6).map((person) => `<span class="metadataChip">${escapeHtml(person)}</span>`).join('')}${maintainers.length > 6 ? `<small>+${maintainers.length - 6} more</small>` : ''}</dd></div>` : ''}
+          ${detail.createdAt ? `<div><dt>Created</dt><dd>${renderDate(detail.createdAt)}</dd></div>` : ''}
+          ${detail.modifiedAt ? `<div><dt>Modified</dt><dd>${renderDate(detail.modifiedAt)}</dd></div>` : ''}
+          ${Number.isFinite(detail.versionCount) ? `<div><dt>Versions</dt><dd>${formatNumber(detail.versionCount)}</dd></div>` : ''}
+          ${distTags.length ? `<div><dt>Dist tags</dt><dd>${distTags.map(([tag, version]) => `<span class="metadataChip tag"><strong>${escapeHtml(tag)}</strong> ${escapeHtml(version)}</span>`).join('')}</dd></div>` : ''}
+          ${keywords.length ? `<div><dt>Keywords</dt><dd>${keywords.slice(0, 12).map((keyword) => `<span class="metadataChip">${escapeHtml(keyword)}</span>`).join('')}${keywords.length > 12 ? `<small>+${keywords.length - 12} more</small>` : ''}</dd></div>` : ''}
+        </dl>
+      </section>
+    `;
   }
 
   function renderUpdate(dependency) {

@@ -307,6 +307,14 @@ class NpmWorkspaceModel {
       homepage: registry.homepage,
       repository: registry.repository,
       license: registry.license,
+      author: registry.author,
+      publisher: registry.publisher,
+      maintainers: registry.maintainers,
+      keywords: registry.keywords,
+      distTags: registry.distTags,
+      createdAt: registry.createdAt,
+      modifiedAt: registry.modifiedAt,
+      versionCount: registry.versionCount,
       deprecated: Boolean(versionInfo.manifest && versionInfo.manifest.deprecated),
       deprecatedMessage: versionInfo.manifest && versionInfo.manifest.deprecated ? versionInfo.manifest.deprecated : '',
       vulnerabilities,
@@ -419,12 +427,20 @@ class NpmWorkspaceModel {
       name,
       description: data.description || '',
       latestVersion: data['dist-tags'] && data['dist-tags'].latest ? data['dist-tags'].latest : '',
+      distTags: data['dist-tags'] || {},
       time: data.time || {},
       versions: data.versions || {},
       readme: data.readme || '',
       homepage: data.homepage || '',
       repository: normalizeRepository(data.repository),
-      license: data.license || ''
+      license: data.license || '',
+      author: normalizePerson(data.author),
+      publisher: normalizePerson(data._npmUser),
+      maintainers: Array.isArray(data.maintainers) ? data.maintainers.map(normalizePerson).filter(Boolean) : [],
+      keywords: Array.isArray(data.keywords) ? data.keywords.filter(Boolean) : [],
+      createdAt: data.time && data.time.created ? data.time.created : '',
+      modifiedAt: data.time && data.time.modified ? data.time.modified : '',
+      versionCount: data.versions ? Object.keys(data.versions).length : 0
     };
 
     this.registryCache.set(name, normalized);
@@ -993,6 +1009,19 @@ function normalizeRepository(repository) {
     return repository;
   }
   return repository.url || '';
+}
+
+function normalizePerson(person) {
+  if (!person) {
+    return '';
+  }
+  if (typeof person === 'string') {
+    return person;
+  }
+
+  const name = person.name || person.username || person.email || '';
+  const email = person.email && person.email !== name ? ` <${person.email}>` : '';
+  return `${name}${email}`.trim();
 }
 
 function getGitHubReadmeCandidates(packageName, registry) {
