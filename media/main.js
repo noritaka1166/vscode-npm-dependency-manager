@@ -52,54 +52,82 @@
 
   function renderList() {
     const counts = state.dependencyCounts || { dependencies: 0, devDependencies: 0 };
+    const visibleDependencies = getVisibleDependencies();
 
     app.innerHTML = `
-      <section class="toolbar">
-        <label class="field">
-          <span>package.json</span>
-          <select id="packageSelect">
-            ${state.packageFiles.map((file) => `<option value="${escapeAttr(file.path)}" ${file.path === state.selectedPackageJson ? 'selected' : ''}>${escapeHtml(file.label)}</option>`).join('')}
-          </select>
-        </label>
+      <section class="dashboardHeader">
+        <div class="headerTitle">
+          <h1>npm Packages</h1>
+          <p>${escapeHtml(state.selectedLabel || state.selectedPackageJson || 'No package.json selected')}</p>
+        </div>
+        <button id="refreshAllButton" class="secondaryButton" title="Clear cache and reload registry data">Refresh all</button>
+      </section>
 
-        <div class="segments" role="group" aria-label="Dependency type">
-          ${segment('all', 'All')}
-          ${segment('dependencies', `dependencies ${counts.dependencies}`)}
-          ${segment('devDependencies', `dev ${counts.devDependencies}`)}
+      <section class="controlPanel">
+        <div class="controlPrimary">
+          <label class="field packageField">
+            <span>package.json</span>
+            <select id="packageSelect">
+              ${state.packageFiles.map((file) => `<option value="${escapeAttr(file.path)}" ${file.path === state.selectedPackageJson ? 'selected' : ''}>${escapeHtml(file.label)}</option>`).join('')}
+            </select>
+          </label>
+
+          <label class="field searchField">
+            <span>Search packages</span>
+            <input id="searchInput" type="search" value="${escapeAttr(state.searchQuery || '')}" placeholder="Package name">
+          </label>
         </div>
 
-        <div class="segments riskSegments" role="group" aria-label="Risk">
-          ${riskSegment('all', 'All risk')}
-          ${riskSegment('vulnerable', 'Vulnerable')}
-          ${riskSegment('deprecated', 'Deprecated')}
-          ${riskSegment('notChecked', 'Not checked')}
-          ${riskSegment('ok', 'OK')}
+        <div class="filterGrid">
+          <div class="filterGroup">
+            <span class="groupLabel">Type</span>
+            <div class="segments" role="group" aria-label="Dependency type">
+              ${segment('all', 'All')}
+              ${segment('dependencies', `dependencies ${counts.dependencies}`)}
+              ${segment('devDependencies', `dev ${counts.devDependencies}`)}
+            </div>
+          </div>
+
+          <div class="filterGroup">
+            <span class="groupLabel">Risk</span>
+            <div class="segments riskSegments" role="group" aria-label="Risk">
+              ${riskSegment('all', 'All')}
+              ${riskSegment('vulnerable', 'Vulnerable')}
+              ${riskSegment('deprecated', 'Deprecated')}
+              ${riskSegment('notChecked', 'Not checked')}
+              ${riskSegment('ok', 'OK')}
+            </div>
+          </div>
+
+          <div class="filterGroup wide">
+            <span class="groupLabel">Update</span>
+            <div class="segments updateSegments" role="group" aria-label="Update">
+              ${updateSegment('all', 'All updates')}
+              ${updateSegment('update', 'Updates')}
+              ${updateSegment('major', 'Major')}
+              ${updateSegment('minor', 'Minor')}
+              ${updateSegment('patch', 'Patch')}
+              ${updateSegment('current', 'Current')}
+            </div>
+          </div>
         </div>
 
-        <div class="segments updateSegments" role="group" aria-label="Update">
-          ${updateSegment('all', 'All updates')}
-          ${updateSegment('update', 'Updates')}
-          ${updateSegment('major', 'Major')}
-          ${updateSegment('minor', 'Minor')}
-          ${updateSegment('patch', 'Patch')}
-          ${updateSegment('current', 'Current')}
-        </div>
-
-        <label class="field">
-          <span>Search packages</span>
-          <input id="searchInput" type="search" value="${escapeAttr(state.searchQuery || '')}" placeholder="Package name">
-        </label>
-
-        ${renderLockSummary(state.lockInfo)}
-
-        <div class="toolbarActions">
+        <div class="statusGrid">
+          ${renderLockSummary(state.lockInfo)}
           ${renderCacheSummary(state.cacheStats)}
-          <button id="refreshAllButton" class="secondaryButton" title="Clear cache and reload registry data">Refresh all</button>
         </div>
       </section>
 
-      <section id="dependencyTable">
-        ${state.message ? `<p class="empty">${escapeHtml(state.message)}</p>` : renderDependencyTable(getVisibleDependencies())}
+      <section class="dependencySection">
+        <div class="sectionHeader">
+          <div>
+            <h2>Packages</h2>
+            <p>${formatNumber(visibleDependencies.length)} shown from ${formatNumber(state.dependencies.length)} loaded packages</p>
+          </div>
+        </div>
+        <div id="dependencyTable">
+          ${state.message ? `<p class="empty">${escapeHtml(state.message)}</p>` : renderDependencyTable(visibleDependencies)}
+        </div>
       </section>
     `;
 
@@ -228,7 +256,8 @@
     }
 
     return `
-      <div class="list">
+      <div class="tableScroller">
+        <div class="list">
         <div class="row head">
           <span>Package</span>
           <span>Type</span>
@@ -255,6 +284,7 @@
             <span class="risk">${renderRisk(dependency)}</span>
           </div>
         `).join('')}
+        </div>
       </div>
     `;
   }
