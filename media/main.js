@@ -286,6 +286,50 @@
     document.getElementById('backButton').addEventListener('click', () => {
       vscode.postMessage({ type: 'backToList' });
     });
+    bindReadmeLinks();
+  }
+
+  function bindReadmeLinks() {
+    const readme = document.querySelector('.readme');
+    if (!readme) {
+      return;
+    }
+
+    readme.addEventListener('click', (event) => {
+      const link = event.target.closest('a[href]');
+      if (!link || !readme.contains(link)) {
+        return;
+      }
+
+      const href = link.getAttribute('href') || '';
+      if (href.startsWith('#')) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      const url = toExternalUrl(href);
+      if (url) {
+        vscode.postMessage({ type: 'openExternal', url });
+      }
+    }, true);
+  }
+
+  function toExternalUrl(href) {
+    if (href.startsWith('//')) {
+      return `https:${href}`;
+    }
+
+    try {
+      const url = new URL(href, window.location.href);
+      if (url.protocol === 'http:' || url.protocol === 'https:' || url.protocol === 'mailto:') {
+        return url.href;
+      }
+    } catch (error) {
+      return '';
+    }
+    return '';
   }
 
   function renderLoading(message) {

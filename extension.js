@@ -49,6 +49,15 @@ function activate(context) {
 
 function deactivate() {}
 
+async function openExternalUrl(value) {
+  const url = String(value || '').trim();
+  if (!/^(https?:|mailto:)/i.test(url)) {
+    throw new Error('Only external http, https, and mailto links can be opened.');
+  }
+
+  await vscode.env.openExternal(vscode.Uri.parse(url));
+}
+
 class NpmWorkspaceModel {
   constructor() {
     this.packageFiles = [];
@@ -610,6 +619,9 @@ class DashboardPanel {
             break;
           case 'backToList':
             this.update();
+            break;
+          case 'openExternal':
+            await openExternalUrl(message.url);
             break;
         }
       } catch (error) {
