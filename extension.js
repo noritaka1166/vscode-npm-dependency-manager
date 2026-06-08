@@ -1,11 +1,17 @@
 const vscode = require('vscode');
 const path = require('path');
+const MarkdownIt = require('markdown-it');
 
 const VIEW_ID = 'workspaceNpmSidebar.dependenciesView';
 const PANEL_TYPE = 'workspaceNpmSidebar.dashboard';
 const REGISTRY_BASE_URL = 'https://registry.npmjs.org';
 const AUDIT_BULK_URL = `${REGISTRY_BASE_URL}/-/npm/v1/security/advisories/bulk`;
 const DOWNLOADS_API_BASE_URL = 'https://api.npmjs.org/downloads/point/last-week';
+const markdown = new MarkdownIt({
+  html: true,
+  linkify: true,
+  typographer: false
+});
 
 function activate(context) {
   const model = new NpmWorkspaceModel();
@@ -235,6 +241,7 @@ class NpmWorkspaceModel {
     const vulnerabilities = dependency && dependency.vulnerabilities ? dependency.vulnerabilities : [];
     const fallbackReadme = registry.readme ? '' : await this.getFallbackReadme(name, registry);
     const weeklyDownloads = await this.getWeeklyDownloads(name);
+    const readme = registry.readme || fallbackReadme || 'This package does not publish README content to the npm registry.';
 
     return {
       name,
@@ -254,7 +261,8 @@ class NpmWorkspaceModel {
       auditError: dependency && dependency.auditError ? dependency.auditError : '',
       maxSeverity: dependency && dependency.maxSeverity ? dependency.maxSeverity : getMaxSeverity(vulnerabilities),
       weeklyDownloads,
-      readme: registry.readme || fallbackReadme || 'This package does not publish README content to the npm registry.'
+      readme,
+      readmeHtml: renderReadmeHtml(readme)
     };
   }
 
@@ -705,6 +713,21 @@ function normalizeAdvisory(advisory) {
     vulnerableVersions: advisory.vulnerable_versions || advisory.vulnerableVersions || advisory.range || '',
     patchedVersions: advisory.patched_versions || advisory.patchedVersions || ''
   };
+}
+
+function renderReadmeHtml(readme) {
+  return sanitizeReadmeHtml(markdown.render(String(readme || '')));
+}
+
+function sanitizeReadmeHtml(html) {
+  return String(html || '')
+    .replace(/<script\b[\s\S]*?<\/script>/gi, '')
+    .replace(/<style\b[\s\S]*?<\/style>/gi, '')
+    .replace(/<(iframe|object|embed|form|input|button|textarea|select|meta|link)\b[\s\S]*?<\/\1>/gi, '')
+    .replace(/<(iframe|object|embed|form|input|button|textarea|select|meta|link)\b[^>]*>/gi, '')
+    .replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/\s+(href|src|srcset)\s*=\s*(['"])\s*javascript:[\s\S]*?\2/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '');
 }
 
 function getMaxSeverity(vulnerabilities) {

@@ -14,7 +14,7 @@ VS Code sidebar extension for browsing dependencies from workspace `package.json
 - Shows the installed version range, its publish date, the npm latest version, and the latest version publish date.
 - Flags deprecated package versions from npm registry metadata.
 - Checks known vulnerabilities with npm audit bulk advisories when a resolved version is available.
-- Opens a package detail view in the main editor with npm registry README content and package metadata.
+- Opens a package detail view in the main editor with npm registry README content rendered by `markdown-it`.
 
 ## Run locally
 

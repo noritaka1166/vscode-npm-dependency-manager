@@ -475,6 +475,14 @@ small {
   border-radius: 6px;
 }
 
+.readme p a img {
+  width: auto;
+  max-height: 24px;
+  margin: 0 4px 6px 0;
+  border-radius: 0;
+  vertical-align: middle;
+}
+
 .readme .badgeLink {
   display: inline-flex;
   margin: 0 4px 6px 0;
