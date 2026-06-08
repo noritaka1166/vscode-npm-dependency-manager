@@ -26,9 +26,11 @@ function activate(context) {
         panel.show();
       }
     }),
-    model.onDidChange(() => {
+    model.onDidChange((reason) => {
       tree.refresh();
-      panel.update();
+      if (reason !== 'search') {
+        panel.update();
+      }
     }),
     vscode.commands.registerCommand('workspaceNpmSidebar.show', () => panel.show()),
     vscode.commands.registerCommand('workspaceNpmSidebar.refresh', async () => {
@@ -54,6 +56,7 @@ class NpmWorkspaceModel {
     this.filter = 'all';
     this.searchQuery = '';
     this.dependencies = [];
+    this.allDependencies = [];
     this.dependencyCounts = {
       dependencies: 0,
       devDependencies: 0
@@ -78,6 +81,7 @@ class NpmWorkspaceModel {
     if (!this.packageFiles.length) {
       this.selectedPackageJson = undefined;
       this.dependencies = [];
+      this.allDependencies = [];
       this.message = 'No package.json files found in this workspace.';
       this.emit();
       return;
@@ -97,12 +101,12 @@ class NpmWorkspaceModel {
 
   async setFilter(filter) {
     this.filter = filter || 'all';
-    await this.loadDependencies();
+    this.applyDependencyView();
   }
 
   async setSearchQuery(query) {
     this.searchQuery = String(query || '');
-    await this.loadDependencies();
+    this.applyDependencyView(true, 'search');
   }
 
   async loadDependencies() {
@@ -117,16 +121,28 @@ class NpmWorkspaceModel {
     const packageJson = await readPackageJson(this.selectedPackageJson);
     this.lockVersions = await readLockVersions(this.selectedPackageJson);
     this.dependencyCounts = getDependencyCounts(packageJson);
-    const entries = filterDependencyEntries(collectDependencyEntries(packageJson, this.filter), this.searchQuery);
+    const entries = collectDependencyEntries(packageJson, 'all');
 
-    this.dependencies = await mapWithConcurrency(entries, 8, async (entry) => {
+    this.allDependencies = await mapWithConcurrency(entries, 8, async (entry) => {
       return this.enrichDependency(entry, this.lockVersions.get(entry.name));
     });
 
-    await this.attachAuditInfo(this.dependencies);
+    await this.attachAuditInfo(this.allDependencies);
 
     this.message = '';
+    this.applyDependencyView(false);
     this.emit();
+  }
+
+  applyDependencyView(emit = true, reason = 'state') {
+    this.dependencies = filterDependencyEntries(
+      filterDependencyType(this.allDependencies, this.filter),
+      this.searchQuery
+    );
+
+    if (emit) {
+      this.emit(reason);
+    }
   }
 
   async enrichDependency(entry, resolvedVersion) {
@@ -316,7 +332,7 @@ class NpmWorkspaceModel {
   }
 
   findKnownDependency(name) {
-    return this.dependencies.find((dependency) => dependency.name === name);
+    return this.allDependencies.find((dependency) => dependency.name === name);
   }
 
   async getPackageDependencies(dependency, ancestry) {
@@ -392,13 +408,13 @@ class NpmWorkspaceModel {
       filter: this.filter,
       searchQuery: this.searchQuery,
       dependencyCounts: this.dependencyCounts,
-      dependencies: this.dependencies,
+      dependencies: filterDependencyType(this.allDependencies, this.filter),
       message: this.message
     };
   }
 
-  emit() {
-    this.emitter.fire();
+  emit(reason = 'state') {
+    this.emitter.fire(reason);
   }
 }
 
@@ -678,6 +694,13 @@ function filterDependencyEntries(entries, searchQuery) {
   return entries.filter((entry) => {
     return entry.name.toLowerCase().includes(query) || String(entry.description || '').toLowerCase().includes(query);
   });
+}
+
+function filterDependencyType(entries, filter) {
+  if (filter === 'all') {
+    return entries;
+  }
+  return entries.filter((entry) => entry.type === filter);
 }
 
 function getDependencyCounts(packageJson) {

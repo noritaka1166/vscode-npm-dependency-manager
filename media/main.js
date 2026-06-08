@@ -58,7 +58,9 @@
         </label>
       </section>
 
-      ${state.message ? `<p class="empty">${escapeHtml(state.message)}</p>` : renderDependencyTable(state.dependencies)}
+      <section id="dependencyTable">
+        ${state.message ? `<p class="empty">${escapeHtml(state.message)}</p>` : renderDependencyTable(getVisibleDependencies())}
+      </section>
     `;
 
     const packageSelect = document.getElementById('packageSelect');
@@ -78,17 +80,44 @@
     if (searchInput) {
       let searchTimer;
       searchInput.addEventListener('input', (event) => {
+        state.searchQuery = event.target.value;
+        updateDependencyTable();
         clearTimeout(searchTimer);
         searchTimer = setTimeout(() => {
           vscode.postMessage({ type: 'setSearchQuery', query: event.target.value });
-        }, 180);
+        }, 300);
       });
     }
 
+    bindPackageButtons();
+  }
+
+  function updateDependencyTable() {
+    const dependencyTable = document.getElementById('dependencyTable');
+    if (!dependencyTable) {
+      return;
+    }
+
+    dependencyTable.innerHTML = renderDependencyTable(getVisibleDependencies());
+    bindPackageButtons();
+  }
+
+  function bindPackageButtons() {
     document.querySelectorAll('[data-package]').forEach((button) => {
       button.addEventListener('click', () => {
         vscode.postMessage({ type: 'openPackage', name: button.dataset.package });
       });
+    });
+  }
+
+  function getVisibleDependencies() {
+    const query = String(state.searchQuery || '').trim().toLowerCase();
+    if (!query) {
+      return state.dependencies;
+    }
+
+    return state.dependencies.filter((dependency) => {
+      return dependency.name.toLowerCase().includes(query) || String(dependency.description || '').toLowerCase().includes(query);
     });
   }
 
