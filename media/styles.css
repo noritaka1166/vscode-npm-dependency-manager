@@ -26,6 +26,13 @@ input {
   gap: 10px;
 }
 
+.toolbarActions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
 .field {
   display: grid;
   gap: 4px;
@@ -94,6 +101,29 @@ input {
   background: color-mix(in srgb, var(--vscode-testing-iconPassed) 8%, var(--vscode-editorWidget-background, transparent));
   border: 1px solid color-mix(in srgb, var(--vscode-testing-iconPassed) 24%, var(--vscode-widget-border, transparent));
   border-radius: 6px;
+}
+
+.cacheSummary {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px;
+  color: var(--vscode-foreground);
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-widget-border, transparent);
+  border-radius: 6px;
+}
+
+.cacheSummary span {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+
+.cacheSummary strong,
+.cacheSummary small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .lockSummary.warning {
@@ -393,6 +423,26 @@ small {
   border: 0;
   border-radius: 4px;
   cursor: pointer;
+}
+
+.secondaryButton {
+  min-height: 28px;
+  padding: 4px 9px;
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.secondaryButton:hover {
+  background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.compactButton {
+  min-height: 24px;
+  padding: 2px 7px;
+  font-size: 11px;
 }
 
 .detailPage {

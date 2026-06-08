@@ -28,13 +28,13 @@ function activate(context) {
     }),
     model.onDidChange((reason) => {
       tree.refresh();
-      if (reason !== 'search') {
+      if (reason !== 'search' && reason !== 'detailRefresh') {
         panel.update();
       }
     }),
     vscode.commands.registerCommand('workspaceNpmSidebar.show', () => panel.show()),
     vscode.commands.registerCommand('workspaceNpmSidebar.refresh', async () => {
-      await model.refresh();
+      await model.refreshFromNetwork();
       panel.show();
     }),
     vscode.commands.registerCommand('workspaceNpmSidebar.openPackage', async (dependency) => {
@@ -103,6 +103,56 @@ class NpmWorkspaceModel {
     }
 
     await this.loadDependencies();
+  }
+
+  async refreshFromNetwork() {
+    this.clearCaches();
+    await this.refresh();
+  }
+
+  clearCaches() {
+    this.registryCache.clear();
+    this.dependencyCache.clear();
+    this.auditCache.clear();
+    this.readmeFallbackCache.clear();
+    this.downloadCache.clear();
+  }
+
+  clearPackageCaches(name) {
+    this.registryCache.delete(name);
+    this.readmeFallbackCache.delete(name);
+    this.downloadCache.delete(name);
+    this.auditCache.clear();
+    [...this.dependencyCache.keys()].forEach((key) => {
+      if (key.startsWith(`${name}@`)) {
+        this.dependencyCache.delete(key);
+      }
+    });
+  }
+
+  async refreshPackage(name) {
+    this.clearPackageCaches(name);
+    const index = this.allDependencies.findIndex((dependency) => dependency.name === name);
+    if (index === -1) {
+      this.applyDependencyView(false);
+      this.emit('detailRefresh');
+      return undefined;
+    }
+
+    const current = this.allDependencies[index];
+    const refreshed = await this.enrichDependency(
+      {
+        name: current.name,
+        currentVersion: current.currentVersion,
+        type: current.type
+      },
+      this.lockInfo.packages.get(name)
+    );
+    await this.attachAuditInfo([refreshed]);
+    this.allDependencies[index] = refreshed;
+    this.applyDependencyView(false);
+    this.emit('detailRefresh');
+    return refreshed;
   }
 
   async selectPackageJson(path) {
@@ -337,6 +387,7 @@ class NpmWorkspaceModel {
       auditError: dependency && dependency.auditError ? dependency.auditError : '',
       maxSeverity: dependency && dependency.maxSeverity ? dependency.maxSeverity : getMaxSeverity(vulnerabilities),
       weeklyDownloads,
+      cacheStats: this.getCacheStats(),
       readme,
       readmeHtml: renderReadmeHtml(readme)
     };
@@ -478,6 +529,7 @@ class NpmWorkspaceModel {
       updateFilter: this.updateFilter,
       searchQuery: this.searchQuery,
       dependencyCounts: this.dependencyCounts,
+      cacheStats: this.getCacheStats(),
       lockInfo: {
         exists: this.lockInfo.exists,
         path: this.lockInfo.path,
@@ -493,6 +545,16 @@ class NpmWorkspaceModel {
 
   emit(reason = 'state') {
     this.emitter.fire(reason);
+  }
+
+  getCacheStats() {
+    return {
+      registry: this.registryCache.size,
+      dependencies: this.dependencyCache.size,
+      audit: this.auditCache.size,
+      readme: this.readmeFallbackCache.size,
+      downloads: this.downloadCache.size
+    };
   }
 }
 
@@ -624,6 +686,12 @@ class DashboardPanel {
           case 'setUpdateFilter':
             await this.model.setUpdateFilter(message.filter);
             break;
+          case 'refreshAll':
+            await this.model.refreshFromNetwork();
+            break;
+          case 'refreshPackage':
+            await this.refreshPackage(message.name);
+            break;
           case 'openPackage':
             await this.showPackage(message.name);
             break;
@@ -645,6 +713,14 @@ class DashboardPanel {
   async showPackage(name, dependency) {
     this.show();
     this.post({ type: 'loading', message: `Loading ${name}...` });
+    const detail = await this.model.getDetail(name, dependency);
+    this.post({ type: 'detail', detail });
+  }
+
+  async refreshPackage(name) {
+    this.show();
+    this.post({ type: 'loading', message: `Refreshing ${name}...` });
+    const dependency = await this.model.refreshPackage(name);
     const detail = await this.model.getDetail(name, dependency);
     this.post({ type: 'detail', detail });
   }

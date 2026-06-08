@@ -19,6 +19,13 @@
       packageCount: 0,
       error: ''
     },
+    cacheStats: {
+      registry: 0,
+      dependencies: 0,
+      audit: 0,
+      readme: 0,
+      downloads: 0
+    },
     dependencies: []
   };
 
@@ -84,6 +91,11 @@
         </label>
 
         ${renderLockSummary(state.lockInfo)}
+
+        <div class="toolbarActions">
+          ${renderCacheSummary(state.cacheStats)}
+          <button id="refreshAllButton" class="secondaryButton" title="Clear cache and reload registry data">Refresh all</button>
+        </div>
       </section>
 
       <section id="dependencyTable">
@@ -95,6 +107,13 @@
     if (packageSelect) {
       packageSelect.addEventListener('change', (event) => {
         vscode.postMessage({ type: 'selectPackageJson', path: event.target.value });
+      });
+    }
+
+    const refreshAllButton = document.getElementById('refreshAllButton');
+    if (refreshAllButton) {
+      refreshAllButton.addEventListener('click', () => {
+        vscode.postMessage({ type: 'refreshAll' });
       });
     }
 
@@ -249,6 +268,7 @@
             <div class="packageTitleLine">
               <h1>${escapeHtml(detail.name)}</h1>
               <span class="risk packageRisk">${renderRisk(detail)}</span>
+              <button id="refreshPackageButton" class="secondaryButton compactButton" data-package="${escapeAttr(detail.name)}" title="Clear cache and reload this package">Refresh</button>
             </div>
             <p>${escapeHtml(detail.description || 'No description provided.')}</p>
           </div>
@@ -317,6 +337,9 @@
 
     document.getElementById('backButton').addEventListener('click', () => {
       vscode.postMessage({ type: 'backToList' });
+    });
+    document.getElementById('refreshPackageButton').addEventListener('click', (event) => {
+      vscode.postMessage({ type: 'refreshPackage', name: event.currentTarget.dataset.package });
     });
     bindReadmeLinks();
   }
@@ -400,6 +423,15 @@
     document.querySelectorAll('[data-update-filter]').forEach((button) => {
       button.classList.toggle('active', button.dataset.updateFilter === state.updateFilter);
     });
+  }
+
+  function renderCacheSummary(cacheStats) {
+    const stats = cacheStats || {};
+    const total = ['registry', 'dependencies', 'audit', 'readme', 'downloads'].reduce((sum, key) => {
+      return sum + (Number.isFinite(stats[key]) ? stats[key] : 0);
+    }, 0);
+
+    return `<div class="cacheSummary"><span>cache</span><strong>${formatNumber(total)} entries</strong><small>registry ${formatNumber(stats.registry || 0)} / audit ${formatNumber(stats.audit || 0)} / downloads ${formatNumber(stats.downloads || 0)}</small></div>`;
   }
 
   function renderLockSummary(lockInfo) {
