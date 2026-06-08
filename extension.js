@@ -540,9 +540,21 @@ async function findPackageJsonFiles() {
   return files
     .map((uri) => ({
       path: uri.fsPath,
-      label: vscode.workspace.asRelativePath(uri, false)
+      label: vscode.workspace.asRelativePath(uri, false),
+      isWorkspaceRootPackageJson: isWorkspaceRootPackageJson(uri)
     }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+    .sort((a, b) => {
+      if (a.isWorkspaceRootPackageJson !== b.isWorkspaceRootPackageJson) {
+        return a.isWorkspaceRootPackageJson ? -1 : 1;
+      }
+      return a.label.localeCompare(b.label);
+    });
+}
+
+function isWorkspaceRootPackageJson(uri) {
+  return (vscode.workspace.workspaceFolders || []).some((folder) => {
+    return path.dirname(uri.fsPath) === folder.uri.fsPath && path.basename(uri.fsPath) === 'package.json';
+  });
 }
 
 async function readPackageJson(fsPath) {
