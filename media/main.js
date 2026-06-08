@@ -298,6 +298,8 @@
               </dl>
             </section>
 
+            ${renderDependencyTreeContext(detail)}
+
             <section class="sideSection">
               <h2>Lockfile</h2>
               <dl class="facts">
@@ -499,6 +501,25 @@
       flags.push('peer');
     }
     return flags.length ? `<div><dt>Flags</dt><dd>${flags.map((flag) => `<span class="lockFlag">${escapeHtml(flag)}</span>`).join('')}</dd></div>` : '';
+  }
+
+  function renderDependencyTreeContext(detail) {
+    if (!detail.parentName && !detail.dependencyPath) {
+      return '';
+    }
+
+    return `
+      <section class="sideSection">
+        <h2>Dependency Tree</h2>
+        <dl class="facts">
+          ${detail.dependencyPath ? `<div><dt>Path</dt><dd>${escapeHtml(detail.dependencyPath)}</dd></div>` : ''}
+          ${detail.parentName ? `<div><dt>Required by</dt><dd>${escapeHtml(`${detail.parentName}@${detail.parentVersion || '-'}`)}</dd></div>` : ''}
+          ${detail.currentVersion ? `<div><dt>Requested range</dt><dd>${escapeHtml(detail.currentVersion)}</dd></div>` : ''}
+          ${detail.resolvedFromVersion ? `<div><dt>Parent manifest</dt><dd>${escapeHtml(detail.resolvedFromVersion)}</dd></div>` : ''}
+          ${Number.isFinite(detail.dependencyDepth) ? `<div><dt>Depth</dt><dd>${formatNumber(detail.dependencyDepth)}</dd></div>` : ''}
+        </dl>
+      </section>
+    `;
   }
 
   function renderNpmMetadata(detail) {

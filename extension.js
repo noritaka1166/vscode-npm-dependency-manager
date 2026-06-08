@@ -347,12 +347,19 @@ class NpmWorkspaceModel {
     return {
       name,
       description: registry.description,
+      currentVersion: dependency && dependency.currentVersion ? dependency.currentVersion : '',
       latestVersion: registry.latestVersion,
       resolvedVersion,
       resolvedPublishedAt: getPublishedAt(registry.time, resolvedVersion),
       latestPublishedAt: getPublishedAt(registry.time, registry.latestVersion),
       updateType: updateInfo.type,
       updateLabel: updateInfo.label,
+      dependencyPath: dependency && dependency.dependencyPath ? dependency.dependencyPath : '',
+      dependencyDepth: dependency && Number.isFinite(dependency.dependencyDepth) ? dependency.dependencyDepth : 0,
+      parentName: dependency && dependency.parentName ? dependency.parentName : '',
+      parentVersion: dependency && dependency.parentVersion ? dependency.parentVersion : '',
+      parentRange: dependency && dependency.parentRange ? dependency.parentRange : '',
+      resolvedFromVersion: dependency && dependency.resolvedFromVersion ? dependency.resolvedFromVersion : '',
       lockStatus: lockPackage && lockPackage.lockStatus ? lockPackage.lockStatus : (lockPackage && lockPackage.version ? 'locked' : 'unlocked'),
       lockPath: lockPackage && lockPackage.lockPath ? lockPackage.lockPath : (lockPackage && lockPackage.path ? lockPackage.path : ''),
       lockResolved: lockPackage && lockPackage.lockResolved ? lockPackage.lockResolved : (lockPackage && lockPackage.resolved ? lockPackage.resolved : ''),
@@ -461,18 +468,34 @@ class NpmWorkspaceModel {
         name,
         currentVersion,
         type: 'dependencies',
+        parentName: dependency.name,
+        parentVersion: dependency.resolvedVersion || versionInfo.version,
+        parentRange: dependency.currentVersion,
         resolvedFromVersion: versionInfo.version
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
     const result = await mapWithConcurrency(entries, 8, async (entry) => {
-      return this.enrichDependency(entry, undefined);
+      return this.enrichDependency(entry, this.findLockPackageForChild(dependency, entry.name));
     });
 
     await this.attachAuditInfo(result);
 
     this.dependencyCache.set(cacheKey, result);
     return result;
+  }
+
+  findLockPackageForChild(parentDependency, childName) {
+    const parentLockPath = parentDependency && parentDependency.lockPath ? parentDependency.lockPath : '';
+    if (parentLockPath) {
+      const childPath = `${parentLockPath}/node_modules/${childName}`;
+      const byPath = this.lockInfo.paths.get(childPath);
+      if (byPath) {
+        return byPath;
+      }
+    }
+
+    return this.lockInfo.packages.get(childName);
   }
 
   async getRegistryPackage(name) {
@@ -576,7 +599,7 @@ class DependenciesTreeProvider {
   async getChildren(item) {
     if (item && item.dependency) {
       if (item.ancestry.includes(item.dependency.name)) {
-        return [new MessageTreeItem('Circular dependency')];
+        return [new MessageTreeItem(`Circular dependency: ${[...item.ancestry, item.dependency.name].join(' > ')}`)];
       }
 
       try {
@@ -585,7 +608,7 @@ class DependenciesTreeProvider {
           this.model.searchQuery
         );
         if (!dependencies.length) {
-          return [new MessageTreeItem('No dependencies')];
+          return [new MessageTreeItem(`No dependencies for ${item.dependency.name}@${item.dependency.resolvedVersion || item.dependency.currentVersion || 'latest'}`)];
         }
 
         const ancestry = [...item.ancestry, item.dependency.name];
@@ -614,17 +637,21 @@ class DependenciesTreeProvider {
 class DependencyTreeItem extends vscode.TreeItem {
   constructor(dependency, ancestry) {
     super(dependency.name, vscode.TreeItemCollapsibleState.Collapsed);
-    this.dependency = dependency;
+    this.dependency = {
+      ...dependency,
+      dependencyPath: [...ancestry, dependency.name].join(' > '),
+      dependencyDepth: ancestry.length
+    };
     this.ancestry = ancestry;
-    this.description = getTreeDescription(dependency);
-    this.tooltip = getTreeTooltip(dependency);
-    this.contextValue = 'dependency';
+    this.description = getTreeDescription(this.dependency, ancestry);
+    this.tooltip = getTreeTooltip(this.dependency, ancestry);
+    this.contextValue = ancestry.length ? 'transitiveDependency' : 'dependency';
     this.command = {
       command: 'workspaceNpmSidebar.openPackage',
       title: 'Open Package',
-      arguments: [dependency]
+      arguments: [this.dependency]
     };
-    this.iconPath = getDependencyIcon(dependency);
+    this.iconPath = getDependencyIcon(this.dependency);
   }
 }
 
@@ -825,12 +852,17 @@ async function readPackageLock(packageJsonPath) {
 }
 
 function createMissingLockInfo(lockPath) {
+  const packages = new Map();
+  const paths = new Map();
+  packages.paths = paths;
+
   return {
     exists: false,
     path: lockPath,
     lockfileVersion: '',
     packageCount: 0,
-    packages: new Map(),
+    packages,
+    paths,
     error: ''
   };
 }
@@ -866,6 +898,10 @@ function collectLockDependencyInfo(dependencies, packages, parentPath = 'node_mo
 }
 
 function setLockPackage(packages, packageInfo) {
+  if (packages.paths) {
+    packages.paths.set(packageInfo.path, packageInfo);
+  }
+
   const existing = packages.get(packageInfo.name);
   if (!existing || packageInfo.depth < existing.depth) {
     packages.set(packageInfo.name, packageInfo);
@@ -1035,7 +1071,7 @@ function getMaxSeverity(vulnerabilities) {
   }, 'info');
 }
 
-function getTreeDescription(dependency) {
+function getTreeDescription(dependency, ancestry = []) {
   const flags = [];
   if (dependency.updateType && dependency.updateType !== 'current' && dependency.updateType !== 'unknown') {
     flags.push(dependency.updateType);
@@ -1049,19 +1085,33 @@ function getTreeDescription(dependency) {
   if (dependency.auditStatus === 'vulnerable') {
     flags.push(dependency.maxSeverity || 'vulnerable');
   }
-  return flags.length ? `${dependency.currentVersion}  ${flags.join(', ')}` : dependency.currentVersion;
+
+  const versionText = getTreeVersionText(dependency);
+  const parentText = dependency.parentName ? `via ${dependency.parentName}@${dependency.parentVersion || dependency.resolvedFromVersion || 'unknown'}` : '';
+  const depthText = ancestry.length ? `depth ${ancestry.length}` : 'direct';
+  return [versionText, parentText || depthText, flags.join(', ')].filter(Boolean).join('  ');
 }
 
-function getTreeTooltip(dependency) {
+function getTreeTooltip(dependency, ancestry = []) {
+  const dependencyPath = [...ancestry, dependency.name];
   const lines = [
     dependency.name,
-    dependency.type,
+    `Type: ${ancestry.length ? 'transitive dependency' : 'direct dependency'}`,
+    `Path: ${dependencyPath.join(' > ')}`,
+    `Depth: ${ancestry.length}`,
     `Required: ${dependency.currentVersion}`,
     `Resolved: ${dependency.resolvedVersion || '-'}`,
     `Latest: ${dependency.latestVersion || '-'}`,
     `Update: ${dependency.updateLabel || '-'}`,
     `Lock: ${dependency.lockStatus || 'unknown'}`
   ];
+
+  if (dependency.parentName) {
+    lines.push(`Required by: ${dependency.parentName}@${dependency.parentVersion || '-'}`);
+  }
+  if (dependency.resolvedFromVersion) {
+    lines.push(`Parent manifest version: ${dependency.resolvedFromVersion}`);
+  }
 
   if (dependency.lockPath) {
     lines.push(`Lock path: ${dependency.lockPath}`);
@@ -1081,6 +1131,17 @@ function getTreeTooltip(dependency) {
   }
 
   return lines.join('\n');
+}
+
+function getTreeVersionText(dependency) {
+  if (dependency.currentVersion && dependency.resolvedVersion && dependency.resolvedVersion !== normalizeVersionRange(dependency.currentVersion)) {
+    return `${dependency.currentVersion} -> ${dependency.resolvedVersion}`;
+  }
+  return dependency.currentVersion || dependency.resolvedVersion || '-';
+}
+
+function normalizeVersionRange(value) {
+  return String(value || '').replace(/^[~^<>=\s]+/, '').trim();
 }
 
 function getDependencyIcon(dependency) {
