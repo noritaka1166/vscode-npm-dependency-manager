@@ -176,10 +176,11 @@
           <span>Current published</span>
           <span>Latest</span>
           <span>Latest published</span>
+          <span>Update</span>
           <span>Risk</span>
         </div>
         ${dependencies.map((dependency) => `
-          <div class="row">
+          <div class="row ${getUpdateRowClass(dependency)}">
             <button class="name ${dependency.status}" data-package="${escapeAttr(dependency.name)}" title="${escapeAttr(dependency.description || dependency.name)}">
               ${escapeHtml(dependency.name)}
             </button>
@@ -188,6 +189,7 @@
             <span class="version">${renderDate(dependency.resolvedPublishedAt)}</span>
             <span class="version">${escapeHtml(dependency.latestVersion || '-')}</span>
             <span class="version">${renderDate(dependency.latestPublishedAt)}</span>
+            <span class="update">${renderUpdate(dependency)}</span>
             <span class="risk">${renderRisk(dependency)}</span>
           </div>
         `).join('')}
@@ -228,6 +230,7 @@
                 <div><dt>Resolved published</dt><dd>${renderDate(detail.resolvedPublishedAt)}</dd></div>
                 <div><dt>Latest</dt><dd>${escapeHtml(detail.latestVersion || '-')}</dd></div>
                 <div><dt>Latest published</dt><dd>${renderDate(detail.latestPublishedAt)}</dd></div>
+                <div><dt>Update</dt><dd>${renderUpdate(detail)}</dd></div>
                 ${detail.license ? `<div><dt>License</dt><dd>${escapeHtml(detail.license)}</dd></div>` : ''}
               </dl>
             </section>
@@ -310,6 +313,17 @@
       badges.push('<span class="badge unknown">not checked</span>');
     }
     return badges.length ? badges.join('') : '<span class="badge ok">ok</span>';
+  }
+
+  function renderUpdate(dependency) {
+    const type = dependency.updateType || (dependency.status === 'update' ? 'unknown' : 'current');
+    const label = dependency.updateLabel || type;
+    return `<span class="updateBadge ${escapeAttr(type)}">${escapeHtml(label)}</span>`;
+  }
+
+  function getUpdateRowClass(dependency) {
+    const type = dependency.updateType;
+    return type && type !== 'current' && type !== 'unknown' ? `updateRow ${escapeAttr(type)}Update` : '';
   }
 
   function formatNumber(value) {

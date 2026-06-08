@@ -90,7 +90,7 @@ input {
 
 .row {
   display: grid;
-  grid-template-columns: minmax(116px, 1.4fr) 42px minmax(68px, .75fr) minmax(104px, .9fr) minmax(68px, .75fr) minmax(104px, .9fr) minmax(86px, .8fr);
+  grid-template-columns: minmax(116px, 1.35fr) 42px minmax(68px, .7fr) minmax(104px, .9fr) minmax(68px, .7fr) minmax(104px, .9fr) minmax(68px, .62fr) minmax(86px, .8fr);
   gap: 6px;
   align-items: center;
   min-height: 34px;
@@ -104,6 +104,25 @@ input {
   color: var(--vscode-descriptionForeground);
   background: transparent;
   font-size: 11px;
+}
+
+.row.updateRow {
+  border-left: 3px solid transparent;
+}
+
+.row.majorUpdate {
+  border-left-color: var(--vscode-testing-iconFailed);
+  background: color-mix(in srgb, var(--vscode-testing-iconFailed) 7%, var(--vscode-list-inactiveSelectionBackground, transparent));
+}
+
+.row.minorUpdate {
+  border-left-color: var(--vscode-testing-iconQueued);
+  background: color-mix(in srgb, var(--vscode-testing-iconQueued) 7%, var(--vscode-list-inactiveSelectionBackground, transparent));
+}
+
+.row.patchUpdate {
+  border-left-color: var(--vscode-charts-blue, var(--vscode-textLink-foreground));
+  background: color-mix(in srgb, var(--vscode-charts-blue, var(--vscode-textLink-foreground)) 7%, var(--vscode-list-inactiveSelectionBackground, transparent));
 }
 
 .name {
@@ -153,6 +172,10 @@ input {
   min-width: 0;
 }
 
+.update {
+  min-width: 0;
+}
+
 .badge {
   display: inline-block;
   max-width: 100%;
@@ -179,6 +202,53 @@ input {
 .badge.vulnerable {
   color: var(--vscode-testing-iconFailed);
   background: color-mix(in srgb, var(--vscode-testing-iconFailed) 16%, transparent);
+}
+
+.updateBadge {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 54px;
+  justify-content: center;
+  padding: 2px 6px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.updateBadge.major {
+  color: var(--vscode-testing-iconFailed);
+  background: color-mix(in srgb, var(--vscode-testing-iconFailed) 16%, transparent);
+  border-color: color-mix(in srgb, var(--vscode-testing-iconFailed) 34%, transparent);
+}
+
+.updateBadge.minor {
+  color: var(--vscode-testing-iconQueued);
+  background: color-mix(in srgb, var(--vscode-testing-iconQueued) 18%, transparent);
+  border-color: color-mix(in srgb, var(--vscode-testing-iconQueued) 34%, transparent);
+}
+
+.updateBadge.patch {
+  color: var(--vscode-charts-blue, var(--vscode-textLink-foreground));
+  background: color-mix(in srgb, var(--vscode-charts-blue, var(--vscode-textLink-foreground)) 16%, transparent);
+  border-color: color-mix(in srgb, var(--vscode-charts-blue, var(--vscode-textLink-foreground)) 32%, transparent);
+}
+
+.updateBadge.current {
+  color: var(--vscode-testing-iconPassed);
+  background: color-mix(in srgb, var(--vscode-testing-iconPassed) 14%, transparent);
+  border-color: color-mix(in srgb, var(--vscode-testing-iconPassed) 28%, transparent);
+}
+
+.updateBadge.unknown {
+  color: var(--vscode-descriptionForeground);
+  background: var(--vscode-badge-background);
+  border-color: var(--vscode-widget-border, transparent);
 }
 
 small {

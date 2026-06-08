@@ -154,6 +154,7 @@ class NpmWorkspaceModel {
   async enrichDependency(entry, resolvedVersion) {
     const registry = await this.getRegistryPackage(entry.name);
     const versionInfo = resolveVersionInfo(registry, resolvedVersion || entry.currentVersion);
+    const updateInfo = getUpdateInfo(resolvedVersion || versionInfo.version || entry.currentVersion, registry.latestVersion);
 
     return {
       ...entry,
@@ -164,6 +165,8 @@ class NpmWorkspaceModel {
       description: registry.description,
       npmUrl: `https://www.npmjs.com/package/${entry.name}`,
       status: getVersionStatus(entry.currentVersion, registry.latestVersion),
+      updateType: updateInfo.type,
+      updateLabel: updateInfo.label,
       deprecated: Boolean(versionInfo.manifest && versionInfo.manifest.deprecated),
       deprecatedMessage: versionInfo.manifest && versionInfo.manifest.deprecated ? versionInfo.manifest.deprecated : ''
     };
@@ -264,14 +267,18 @@ class NpmWorkspaceModel {
     const fallbackReadme = registry.readme ? '' : await this.getFallbackReadme(name, registry);
     const weeklyDownloads = await this.getWeeklyDownloads(name);
     const readme = registry.readme || fallbackReadme || 'This package does not publish README content to the npm registry.';
+    const resolvedVersion = dependency && dependency.resolvedVersion ? dependency.resolvedVersion : versionInfo.version;
+    const updateInfo = getUpdateInfo(resolvedVersion, registry.latestVersion);
 
     return {
       name,
       description: registry.description,
       latestVersion: registry.latestVersion,
-      resolvedVersion: dependency && dependency.resolvedVersion ? dependency.resolvedVersion : versionInfo.version,
-      resolvedPublishedAt: getPublishedAt(registry.time, dependency && dependency.resolvedVersion ? dependency.resolvedVersion : versionInfo.version),
+      resolvedVersion,
+      resolvedPublishedAt: getPublishedAt(registry.time, resolvedVersion),
       latestPublishedAt: getPublishedAt(registry.time, registry.latestVersion),
+      updateType: updateInfo.type,
+      updateLabel: updateInfo.label,
       npmUrl: `https://www.npmjs.com/package/${name}`,
       homepage: registry.homepage,
       repository: registry.repository,
@@ -753,6 +760,40 @@ function getVersionStatus(currentRange, latestVersion) {
   return 'update';
 }
 
+function getUpdateInfo(currentRange, latestVersion) {
+  const current = parseSemver(currentRange);
+  const latest = parseSemver(latestVersion);
+
+  if (!current || !latest) {
+    return { type: 'unknown', label: latestVersion ? 'update' : 'unknown' };
+  }
+  if (current.major === latest.major && current.minor === latest.minor && current.patch === latest.patch) {
+    return { type: 'current', label: 'current' };
+  }
+  if (latest.major > current.major) {
+    return { type: 'major', label: 'major' };
+  }
+  if (latest.major === current.major && latest.minor > current.minor) {
+    return { type: 'minor', label: 'minor' };
+  }
+  if (latest.major === current.major && latest.minor === current.minor && latest.patch > current.patch) {
+    return { type: 'patch', label: 'patch' };
+  }
+  return { type: 'current', label: 'current' };
+}
+
+function parseSemver(value) {
+  const match = String(value || '').match(/(\d+)\.(\d+)\.(\d+)/);
+  if (!match) {
+    return null;
+  }
+  return {
+    major: Number.parseInt(match[1], 10),
+    minor: Number.parseInt(match[2], 10),
+    patch: Number.parseInt(match[3], 10)
+  };
+}
+
 function getPublishedAt(timeMap, version) {
   if (!timeMap || !version || !timeMap[version]) {
     return '';
@@ -795,6 +836,9 @@ function getMaxSeverity(vulnerabilities) {
 
 function getTreeDescription(dependency) {
   const flags = [];
+  if (dependency.updateType && dependency.updateType !== 'current' && dependency.updateType !== 'unknown') {
+    flags.push(dependency.updateType);
+  }
   if (dependency.deprecated) {
     flags.push('deprecated');
   }
@@ -810,7 +854,8 @@ function getTreeTooltip(dependency) {
     dependency.type,
     `Required: ${dependency.currentVersion}`,
     `Resolved: ${dependency.resolvedVersion || '-'}`,
-    `Latest: ${dependency.latestVersion || '-'}`
+    `Latest: ${dependency.latestVersion || '-'}`,
+    `Update: ${dependency.updateLabel || '-'}`
   ];
 
   if (dependency.deprecated) {
