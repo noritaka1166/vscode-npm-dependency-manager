@@ -5,6 +5,7 @@
     packageFiles: [],
     selectedPackageJson: '',
     filter: 'all',
+    riskFilter: 'all',
     searchQuery: '',
     dependencyCounts: {
       dependencies: 0,
@@ -52,6 +53,14 @@
           ${segment('devDependencies', `dev ${counts.devDependencies}`)}
         </div>
 
+        <div class="segments riskSegments" role="group" aria-label="Risk">
+          ${riskSegment('all', 'All risk')}
+          ${riskSegment('vulnerable', 'Vulnerable')}
+          ${riskSegment('deprecated', 'Deprecated')}
+          ${riskSegment('notChecked', 'Not checked')}
+          ${riskSegment('ok', 'OK')}
+        </div>
+
         <label class="field">
           <span>Search packages</span>
           <input id="searchInput" type="search" value="${escapeAttr(state.searchQuery || '')}" placeholder="Package name">
@@ -73,6 +82,15 @@
     document.querySelectorAll('[data-filter]').forEach((button) => {
       button.addEventListener('click', () => {
         vscode.postMessage({ type: 'setFilter', filter: button.dataset.filter });
+      });
+    });
+
+    document.querySelectorAll('[data-risk-filter]').forEach((button) => {
+      button.addEventListener('click', () => {
+        state.riskFilter = button.dataset.riskFilter;
+        updateRiskSegments();
+        updateDependencyTable();
+        vscode.postMessage({ type: 'setRiskFilter', filter: button.dataset.riskFilter });
       });
     });
 
@@ -112,12 +130,35 @@
 
   function getVisibleDependencies() {
     const query = String(state.searchQuery || '').trim().toLowerCase();
+    const riskFiltered = filterByRisk(state.dependencies, state.riskFilter);
     if (!query) {
-      return state.dependencies;
+      return riskFiltered;
     }
 
-    return state.dependencies.filter((dependency) => {
+    return riskFiltered.filter((dependency) => {
       return dependency.name.toLowerCase().includes(query) || String(dependency.description || '').toLowerCase().includes(query);
+    });
+  }
+
+  function filterByRisk(dependencies, riskFilter) {
+    if (!riskFilter || riskFilter === 'all') {
+      return dependencies;
+    }
+
+    return dependencies.filter((dependency) => {
+      if (riskFilter === 'vulnerable') {
+        return dependency.auditStatus === 'vulnerable';
+      }
+      if (riskFilter === 'deprecated') {
+        return dependency.deprecated;
+      }
+      if (riskFilter === 'notChecked') {
+        return dependency.auditStatus === 'unknown';
+      }
+      if (riskFilter === 'ok') {
+        return !dependency.deprecated && dependency.auditStatus !== 'vulnerable' && dependency.auditStatus !== 'unknown';
+      }
+      return true;
     });
   }
 
@@ -234,6 +275,16 @@
 
   function segment(value, label) {
     return `<button data-filter="${value}" class="${state.filter === value ? 'active' : ''}">${escapeHtml(label)}</button>`;
+  }
+
+  function riskSegment(value, label) {
+    return `<button data-risk-filter="${value}" class="${state.riskFilter === value ? 'active' : ''}">${escapeHtml(label)}</button>`;
+  }
+
+  function updateRiskSegments() {
+    document.querySelectorAll('[data-risk-filter]').forEach((button) => {
+      button.classList.toggle('active', button.dataset.riskFilter === state.riskFilter);
+    });
   }
 
   function renderDate(value) {

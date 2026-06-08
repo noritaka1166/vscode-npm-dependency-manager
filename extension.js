@@ -54,6 +54,7 @@ class NpmWorkspaceModel {
     this.packageFiles = [];
     this.selectedPackageJson = undefined;
     this.filter = 'all';
+    this.riskFilter = 'all';
     this.searchQuery = '';
     this.dependencies = [];
     this.allDependencies = [];
@@ -109,6 +110,11 @@ class NpmWorkspaceModel {
     this.applyDependencyView(true, 'search');
   }
 
+  async setRiskFilter(filter) {
+    this.riskFilter = filter || 'all';
+    this.applyDependencyView(true, 'risk');
+  }
+
   async loadDependencies() {
     if (!this.selectedPackageJson) {
       await this.refresh();
@@ -136,7 +142,7 @@ class NpmWorkspaceModel {
 
   applyDependencyView(emit = true, reason = 'state') {
     this.dependencies = filterDependencyEntries(
-      filterDependencyType(this.allDependencies, this.filter),
+      filterDependencyRisk(filterDependencyType(this.allDependencies, this.filter), this.riskFilter),
       this.searchQuery
     );
 
@@ -406,6 +412,7 @@ class NpmWorkspaceModel {
       selectedPackageJson: this.selectedPackageJson,
       selectedLabel: this.getSelectedLabel(),
       filter: this.filter,
+      riskFilter: this.riskFilter,
       searchQuery: this.searchQuery,
       dependencyCounts: this.dependencyCounts,
       dependencies: filterDependencyType(this.allDependencies, this.filter),
@@ -539,6 +546,9 @@ class DashboardPanel {
             break;
           case 'setSearchQuery':
             await this.model.setSearchQuery(message.query);
+            break;
+          case 'setRiskFilter':
+            await this.model.setRiskFilter(message.filter);
             break;
           case 'openPackage':
             await this.showPackage(message.name);
@@ -701,6 +711,28 @@ function filterDependencyType(entries, filter) {
     return entries;
   }
   return entries.filter((entry) => entry.type === filter);
+}
+
+function filterDependencyRisk(entries, filter) {
+  if (filter === 'all') {
+    return entries;
+  }
+
+  return entries.filter((entry) => {
+    if (filter === 'vulnerable') {
+      return entry.auditStatus === 'vulnerable';
+    }
+    if (filter === 'deprecated') {
+      return entry.deprecated;
+    }
+    if (filter === 'notChecked') {
+      return entry.auditStatus === 'unknown';
+    }
+    if (filter === 'ok') {
+      return !entry.deprecated && entry.auditStatus !== 'vulnerable' && entry.auditStatus !== 'unknown';
+    }
+    return true;
+  });
 }
 
 function getDependencyCounts(packageJson) {
