@@ -82,6 +82,32 @@ input {
   background: var(--vscode-button-background);
 }
 
+.lockSummary {
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  color: var(--vscode-foreground);
+  background: color-mix(in srgb, var(--vscode-testing-iconPassed) 8%, var(--vscode-editorWidget-background, transparent));
+  border: 1px solid color-mix(in srgb, var(--vscode-testing-iconPassed) 24%, var(--vscode-widget-border, transparent));
+  border-radius: 6px;
+}
+
+.lockSummary.warning {
+  background: color-mix(in srgb, var(--vscode-testing-iconQueued) 10%, var(--vscode-editorWidget-background, transparent));
+  border-color: color-mix(in srgb, var(--vscode-testing-iconQueued) 28%, var(--vscode-widget-border, transparent));
+}
+
+.lockSummary span {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+
+.lockSummary strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .list {
   display: grid;
   gap: 1px;
@@ -90,7 +116,7 @@ input {
 
 .row {
   display: grid;
-  grid-template-columns: minmax(116px, 1.35fr) 42px minmax(68px, .7fr) minmax(104px, .9fr) minmax(68px, .7fr) minmax(104px, .9fr) minmax(68px, .62fr) minmax(86px, .8fr);
+  grid-template-columns: minmax(116px, 1.25fr) 42px minmax(68px, .68fr) minmax(70px, .62fr) minmax(104px, .85fr) minmax(68px, .68fr) minmax(104px, .85fr) minmax(68px, .62fr) minmax(86px, .76fr);
   gap: 6px;
   align-items: center;
   min-height: 34px;
@@ -156,6 +182,46 @@ input {
   background: var(--vscode-badge-background);
   border-radius: 4px;
   font-size: 11px;
+}
+
+.lockCell {
+  min-width: 0;
+}
+
+.lockBadge,
+.lockFlag {
+  display: inline-flex;
+  max-width: 100%;
+  justify-content: center;
+  padding: 2px 6px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.lockBadge.locked {
+  color: var(--vscode-testing-iconPassed);
+  background: color-mix(in srgb, var(--vscode-testing-iconPassed) 14%, transparent);
+  border-color: color-mix(in srgb, var(--vscode-testing-iconPassed) 28%, transparent);
+}
+
+.lockBadge.unlocked {
+  color: var(--vscode-testing-iconQueued);
+  background: color-mix(in srgb, var(--vscode-testing-iconQueued) 16%, transparent);
+  border-color: color-mix(in srgb, var(--vscode-testing-iconQueued) 30%, transparent);
+}
+
+.lockFlag {
+  margin: 0 4px 4px 0;
+  color: var(--vscode-descriptionForeground);
+  background: var(--vscode-badge-background);
+  border-color: var(--vscode-widget-border, transparent);
 }
 
 .version {
@@ -401,6 +467,13 @@ small {
   border: 1px solid var(--vscode-widget-border, transparent);
   border-radius: 6px;
   white-space: nowrap;
+}
+
+.integrity {
+  display: block;
+  padding: 4px;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .facts {

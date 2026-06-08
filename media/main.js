@@ -11,6 +11,13 @@
       dependencies: 0,
       devDependencies: 0
     },
+    lockInfo: {
+      exists: false,
+      label: '',
+      lockfileVersion: '',
+      packageCount: 0,
+      error: ''
+    },
     dependencies: []
   };
 
@@ -65,6 +72,8 @@
           <span>Search packages</span>
           <input id="searchInput" type="search" value="${escapeAttr(state.searchQuery || '')}" placeholder="Package name">
         </label>
+
+        ${renderLockSummary(state.lockInfo)}
       </section>
 
       <section id="dependencyTable">
@@ -173,6 +182,7 @@
           <span>Package</span>
           <span>Type</span>
           <span>Current</span>
+          <span>Lock</span>
           <span>Current published</span>
           <span>Latest</span>
           <span>Latest published</span>
@@ -186,6 +196,7 @@
             </button>
             <span class="pill">${dependency.type === 'dependencies' ? 'dep' : 'dev'}</span>
             <span class="version">${escapeHtml(dependency.currentVersion)}</span>
+            <span class="lockCell">${renderLockBadge(dependency)}</span>
             <span class="version">${renderDate(dependency.resolvedPublishedAt)}</span>
             <span class="version">${escapeHtml(dependency.latestVersion || '-')}</span>
             <span class="version">${renderDate(dependency.latestPublishedAt)}</span>
@@ -232,6 +243,19 @@
                 <div><dt>Latest published</dt><dd>${renderDate(detail.latestPublishedAt)}</dd></div>
                 <div><dt>Update</dt><dd>${renderUpdate(detail)}</dd></div>
                 ${detail.license ? `<div><dt>License</dt><dd>${escapeHtml(detail.license)}</dd></div>` : ''}
+              </dl>
+            </section>
+
+            <section class="sideSection">
+              <h2>Lockfile</h2>
+              <dl class="facts">
+                <div><dt>Status</dt><dd>${renderLockBadge(detail)}</dd></div>
+                ${detail.lockInfo && detail.lockInfo.label ? `<div><dt>File</dt><dd>${escapeHtml(detail.lockInfo.label)}</dd></div>` : ''}
+                ${detail.lockInfo && detail.lockInfo.lockfileVersion ? `<div><dt>lockfileVersion</dt><dd>${escapeHtml(detail.lockInfo.lockfileVersion)}</dd></div>` : ''}
+                ${detail.lockPath ? `<div><dt>Package path</dt><dd>${escapeHtml(detail.lockPath)}</dd></div>` : ''}
+                ${detail.lockResolved ? `<div><dt>Tarball</dt><dd><a href="${escapeAttr(detail.lockResolved)}">${escapeHtml(shortenUrl(detail.lockResolved))}</a></dd></div>` : ''}
+                ${detail.lockIntegrity ? `<div><dt>Integrity</dt><dd><code class="integrity">${escapeHtml(detail.lockIntegrity)}</code></dd></div>` : ''}
+                ${renderLockFlags(detail)}
               </dl>
             </section>
 
@@ -290,6 +314,27 @@
     });
   }
 
+  function renderLockSummary(lockInfo) {
+    if (!lockInfo) {
+      return '';
+    }
+    if (lockInfo.error) {
+      return `<div class="lockSummary warning"><span>package-lock</span><strong>Could not read lockfile</strong><small>${escapeHtml(lockInfo.error)}</small></div>`;
+    }
+    if (!lockInfo.exists) {
+      return '<div class="lockSummary warning"><span>package-lock</span><strong>Not found</strong><small>Resolved versions and vulnerability checks may be less accurate.</small></div>';
+    }
+
+    const version = lockInfo.lockfileVersion ? `v${escapeHtml(lockInfo.lockfileVersion)}` : 'version unknown';
+    return `
+      <div class="lockSummary">
+        <span>package-lock</span>
+        <strong>${escapeHtml(lockInfo.label || 'package-lock.json')}</strong>
+        <small>${version} &middot; ${formatNumber(lockInfo.packageCount)} locked packages</small>
+      </div>
+    `;
+  }
+
   function renderDate(value) {
     if (!value) {
       return '-';
@@ -315,6 +360,27 @@
     return badges.length ? badges.join('') : '<span class="badge ok">ok</span>';
   }
 
+  function renderLockBadge(dependency) {
+    if (dependency.lockStatus === 'locked') {
+      return `<span class="lockBadge locked" title="${escapeAttr(dependency.lockPath || 'Locked in package-lock.json')}">locked</span>`;
+    }
+    return '<span class="lockBadge unlocked" title="Not found in package-lock.json">unlocked</span>';
+  }
+
+  function renderLockFlags(detail) {
+    const flags = [];
+    if (detail.lockDev) {
+      flags.push('dev');
+    }
+    if (detail.lockOptional) {
+      flags.push('optional');
+    }
+    if (detail.lockPeer) {
+      flags.push('peer');
+    }
+    return flags.length ? `<div><dt>Flags</dt><dd>${flags.map((flag) => `<span class="lockFlag">${escapeHtml(flag)}</span>`).join('')}</dd></div>` : '';
+  }
+
   function renderUpdate(dependency) {
     const type = dependency.updateType || (dependency.status === 'update' ? 'unknown' : 'current');
     const label = dependency.updateLabel || type;
@@ -331,6 +397,15 @@
       return '-';
     }
     return value.toLocaleString();
+  }
+
+  function shortenUrl(value) {
+    try {
+      const url = new URL(value);
+      return `${url.host}${url.pathname}`;
+    } catch (error) {
+      return value;
+    }
   }
 
   function renderSecurity(detail) {
