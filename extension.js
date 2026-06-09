@@ -267,7 +267,7 @@ class NpmWorkspaceModel {
       }
 
       dependency.vulnerabilities = auditResult.get(dependency.name) || [];
-      if (dependency.vulnerabilities.every((advisory) => advisory.auditError)) {
+      if (dependency.vulnerabilities.length && dependency.vulnerabilities.every((advisory) => advisory.auditError)) {
         dependency.auditStatus = 'unknown';
         dependency.auditError = dependency.vulnerabilities[0] && dependency.vulnerabilities[0].title;
         dependency.vulnerabilities = [];
@@ -336,13 +336,31 @@ class NpmWorkspaceModel {
     const registry = await this.getRegistryPackage(name);
     const dependency = dependencyHint || this.findKnownDependency(name);
     const versionInfo = resolveVersionInfo(registry, dependency && (dependency.resolvedVersion || dependency.currentVersion));
-    const vulnerabilities = dependency && dependency.vulnerabilities ? dependency.vulnerabilities : [];
     const fallbackReadme = registry.readme ? '' : await this.getFallbackReadme(name, registry);
     const weeklyDownloads = await this.getWeeklyDownloads(name);
     const readme = registry.readme || fallbackReadme || 'This package does not publish README content to the npm registry.';
     const resolvedVersion = dependency && dependency.resolvedVersion ? dependency.resolvedVersion : versionInfo.version;
     const updateInfo = getUpdateInfo(resolvedVersion, registry.latestVersion);
     const lockPackage = dependency && dependency.lockStatus ? dependency : this.lockInfo.packages.get(name);
+    let vulnerabilities = dependency && dependency.vulnerabilities ? dependency.vulnerabilities : [];
+    let auditStatus = dependency && dependency.auditStatus ? dependency.auditStatus : '';
+    let auditError = dependency && dependency.auditError ? dependency.auditError : '';
+
+    if (!auditStatus && resolvedVersion) {
+      const auditResult = await this.getAuditAdvisories({ [name]: [resolvedVersion] });
+      vulnerabilities = auditResult.get(name) || [];
+      if (vulnerabilities.length && vulnerabilities.every((advisory) => advisory.auditError)) {
+        auditStatus = 'unknown';
+        auditError = vulnerabilities[0] && vulnerabilities[0].title;
+        vulnerabilities = [];
+      } else {
+        auditStatus = vulnerabilities.length ? 'vulnerable' : 'ok';
+      }
+    }
+
+    if (!auditStatus) {
+      auditStatus = resolvedVersion ? 'ok' : 'unknown';
+    }
 
     return {
       name,
@@ -390,8 +408,8 @@ class NpmWorkspaceModel {
       deprecated: Boolean(versionInfo.manifest && versionInfo.manifest.deprecated),
       deprecatedMessage: versionInfo.manifest && versionInfo.manifest.deprecated ? versionInfo.manifest.deprecated : '',
       vulnerabilities,
-      auditStatus: dependency && dependency.auditStatus ? dependency.auditStatus : (dependency && dependency.resolvedVersion ? 'ok' : 'unknown'),
-      auditError: dependency && dependency.auditError ? dependency.auditError : '',
+      auditStatus,
+      auditError,
       maxSeverity: dependency && dependency.maxSeverity ? dependency.maxSeverity : getMaxSeverity(vulnerabilities),
       weeklyDownloads,
       cacheStats: this.getCacheStats(),
