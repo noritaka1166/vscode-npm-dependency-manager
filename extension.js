@@ -251,6 +251,8 @@ class NpmWorkspaceModel {
       if (!dependency.resolvedVersion) {
         dependency.auditStatus = 'unknown';
         dependency.vulnerabilities = [];
+        dependency.transitiveVulnerabilities = [];
+        dependency.transitiveVulnerabilityCount = 0;
         return;
       }
 
@@ -261,6 +263,7 @@ class NpmWorkspaceModel {
     });
 
     const auditResult = await this.getAuditAdvisories(auditInput);
+    const lockAuditResult = this.lockInfo.exists ? await this.getAuditAdvisories(getLockAuditInput(this.lockInfo)) : new Map();
     dependencies.forEach((dependency) => {
       if (!dependency.resolvedVersion) {
         return;
@@ -275,6 +278,9 @@ class NpmWorkspaceModel {
       }
       dependency.auditStatus = dependency.vulnerabilities.length ? 'vulnerable' : 'ok';
       dependency.maxSeverity = getMaxSeverity(dependency.vulnerabilities);
+      dependency.transitiveVulnerabilities = getTransitiveVulnerabilities(this.lockInfo, dependency, lockAuditResult);
+      dependency.transitiveVulnerabilityCount = dependency.transitiveVulnerabilities.length;
+      dependency.transitiveMaxSeverity = getMaxSeverity(dependency.transitiveVulnerabilities);
     });
   }
 
@@ -345,6 +351,7 @@ class NpmWorkspaceModel {
     let vulnerabilities = dependency && dependency.vulnerabilities ? dependency.vulnerabilities : [];
     let auditStatus = dependency && dependency.auditStatus ? dependency.auditStatus : '';
     let auditError = dependency && dependency.auditError ? dependency.auditError : '';
+    let transitiveVulnerabilities = dependency && dependency.transitiveVulnerabilities ? dependency.transitiveVulnerabilities : [];
 
     if (!auditStatus && resolvedVersion) {
       const auditResult = await this.getAuditAdvisories({ [name]: [resolvedVersion] });
@@ -360,6 +367,11 @@ class NpmWorkspaceModel {
 
     if (!auditStatus) {
       auditStatus = resolvedVersion ? 'ok' : 'unknown';
+    }
+
+    if (!transitiveVulnerabilities.length && lockPackage && lockPackage.path && this.lockInfo.exists) {
+      const lockAuditResult = await this.getAuditAdvisories(getLockAuditInput(this.lockInfo));
+      transitiveVulnerabilities = getTransitiveVulnerabilities(this.lockInfo, { lockPath: lockPackage.path }, lockAuditResult);
     }
 
     return {
@@ -408,6 +420,9 @@ class NpmWorkspaceModel {
       deprecated: Boolean(versionInfo.manifest && versionInfo.manifest.deprecated),
       deprecatedMessage: versionInfo.manifest && versionInfo.manifest.deprecated ? versionInfo.manifest.deprecated : '',
       vulnerabilities,
+      transitiveVulnerabilities,
+      transitiveVulnerabilityCount: transitiveVulnerabilities.length,
+      transitiveMaxSeverity: getMaxSeverity(transitiveVulnerabilities),
       auditStatus,
       auditError,
       maxSeverity: dependency && dependency.maxSeverity ? dependency.maxSeverity : getMaxSeverity(vulnerabilities),
@@ -895,6 +910,8 @@ function normalizeLockPackage(name, info, packagePath) {
     dev: Boolean(info.dev),
     optional: Boolean(info.optional),
     peer: Boolean(info.peer),
+    dependencies: info.dependencies || {},
+    optionalDependencies: info.optionalDependencies || {},
     depth: getLockPackageDepth(packagePath)
   };
 }
@@ -924,6 +941,94 @@ function setLockPackage(packages, packageInfo) {
   if (!existing || packageInfo.depth < existing.depth) {
     packages.set(packageInfo.name, packageInfo);
   }
+}
+
+function getLockAuditInput(lockInfo) {
+  const input = {};
+  if (!lockInfo || !lockInfo.paths) {
+    return input;
+  }
+
+  lockInfo.paths.forEach((packageInfo) => {
+    if (!packageInfo.name || !packageInfo.version) {
+      return;
+    }
+    if (!input[packageInfo.name]) {
+      input[packageInfo.name] = [];
+    }
+    input[packageInfo.name].push(packageInfo.version);
+  });
+  return input;
+}
+
+function getTransitiveVulnerabilities(lockInfo, dependency, auditResult) {
+  if (!dependency.lockPath || !lockInfo || !lockInfo.paths || !auditResult) {
+    return [];
+  }
+
+  const root = lockInfo.paths.get(dependency.lockPath);
+  if (!root) {
+    return [];
+  }
+
+  const vulnerabilities = [];
+  const seenPaths = new Set();
+  const seenAdvisories = new Set();
+  collectTransitiveVulnerabilities(root, lockInfo, auditResult, vulnerabilities, seenPaths, seenAdvisories);
+  return vulnerabilities;
+}
+
+function collectTransitiveVulnerabilities(packageInfo, lockInfo, auditResult, vulnerabilities, seenPaths, seenAdvisories) {
+  if (!packageInfo || seenPaths.has(packageInfo.path)) {
+    return;
+  }
+  seenPaths.add(packageInfo.path);
+
+  const dependencies = {
+    ...(packageInfo.dependencies || {}),
+    ...(packageInfo.optionalDependencies || {})
+  };
+
+  Object.keys(dependencies).forEach((dependencyName) => {
+    const child = findLockChild(lockInfo, packageInfo.path, dependencyName);
+    if (!child) {
+      return;
+    }
+
+    const advisories = auditResult.get(child.name) || [];
+    advisories.forEach((advisory) => {
+      if (advisory.auditError) {
+        return;
+      }
+      const key = `${child.path}:${advisory.title}:${advisory.severity}:${advisory.vulnerableVersions}`;
+      if (seenAdvisories.has(key)) {
+        return;
+      }
+      seenAdvisories.add(key);
+      vulnerabilities.push({
+        ...advisory,
+        packageName: child.name,
+        packageVersion: child.version,
+        packagePath: child.path
+      });
+    });
+
+    collectTransitiveVulnerabilities(child, lockInfo, auditResult, vulnerabilities, seenPaths, seenAdvisories);
+  });
+}
+
+function findLockChild(lockInfo, parentPath, dependencyName) {
+  const nestedPath = `${parentPath}/node_modules/${dependencyName}`;
+  if (lockInfo.paths.has(nestedPath)) {
+    return lockInfo.paths.get(nestedPath);
+  }
+
+  const hoistedPath = `node_modules/${dependencyName}`;
+  if (lockInfo.paths.has(hoistedPath)) {
+    return lockInfo.paths.get(hoistedPath);
+  }
+
+  return lockInfo.packages.get(dependencyName);
 }
 
 function collectDependencyEntries(packageJson, filter) {
@@ -969,7 +1074,7 @@ function filterDependencyRisk(entries, filter) {
 
   return entries.filter((entry) => {
     if (filter === 'vulnerable') {
-      return entry.auditStatus === 'vulnerable';
+      return entry.auditStatus === 'vulnerable' || entry.transitiveVulnerabilityCount > 0;
     }
     if (filter === 'deprecated') {
       return entry.deprecated;
@@ -978,7 +1083,7 @@ function filterDependencyRisk(entries, filter) {
       return entry.auditStatus === 'unknown';
     }
     if (filter === 'ok') {
-      return !entry.deprecated && entry.auditStatus !== 'vulnerable' && entry.auditStatus !== 'unknown';
+      return !entry.deprecated && entry.auditStatus !== 'vulnerable' && entry.auditStatus !== 'unknown' && !entry.transitiveVulnerabilityCount;
     }
     return true;
   });
@@ -1103,6 +1208,9 @@ function getTreeDescription(dependency, ancestry = []) {
   if (dependency.auditStatus === 'vulnerable') {
     flags.push(dependency.maxSeverity || 'vulnerable');
   }
+  if (dependency.transitiveVulnerabilityCount) {
+    flags.push(`${dependency.transitiveVulnerabilityCount} transitive`);
+  }
 
   const versionText = getTreeVersionText(dependency);
   const parentText = dependency.parentName ? `via ${dependency.parentName}@${dependency.parentVersion || dependency.resolvedFromVersion || 'unknown'}` : '';
@@ -1143,6 +1251,9 @@ function getTreeTooltip(dependency, ancestry = []) {
   }
   if (dependency.auditStatus === 'vulnerable') {
     lines.push(`Vulnerabilities: ${dependency.vulnerabilities.length}`);
+  }
+  if (dependency.transitiveVulnerabilityCount) {
+    lines.push(`Transitive vulnerabilities: ${dependency.transitiveVulnerabilityCount}`);
   }
   if (dependency.auditStatus === 'unknown') {
     lines.push('Vulnerabilities: not checked');

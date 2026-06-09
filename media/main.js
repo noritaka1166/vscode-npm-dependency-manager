@@ -222,7 +222,7 @@
 
     return dependencies.filter((dependency) => {
       if (riskFilter === 'vulnerable') {
-        return dependency.auditStatus === 'vulnerable';
+        return dependency.auditStatus === 'vulnerable' || dependency.transitiveVulnerabilityCount > 0;
       }
       if (riskFilter === 'deprecated') {
         return dependency.deprecated;
@@ -231,7 +231,7 @@
         return dependency.auditStatus === 'unknown';
       }
       if (riskFilter === 'ok') {
-        return !dependency.deprecated && dependency.auditStatus !== 'vulnerable' && dependency.auditStatus !== 'unknown';
+        return !dependency.deprecated && dependency.auditStatus !== 'vulnerable' && dependency.auditStatus !== 'unknown' && !dependency.transitiveVulnerabilityCount;
       }
       return true;
     });
@@ -506,6 +506,9 @@
     if (dependency.auditStatus === 'vulnerable') {
       badges.push(`<span class="badge vulnerable">${escapeHtml(dependency.maxSeverity || 'vuln')}</span>`);
     }
+    if (dependency.transitiveVulnerabilityCount) {
+      badges.push(`<span class="badge transitive">${escapeHtml(dependency.transitiveMaxSeverity || 'transitive')} ${formatNumber(dependency.transitiveVulnerabilityCount)}</span>`);
+    }
     if (dependency.auditStatus === 'unknown') {
       badges.push('<span class="badge unknown">not checked</span>');
     }
@@ -603,7 +606,8 @@
 
   function renderSecurity(detail) {
     const vulnerabilities = detail.vulnerabilities || [];
-    if (!detail.deprecated && !vulnerabilities.length && detail.auditStatus !== 'unknown') {
+    const transitiveVulnerabilities = detail.transitiveVulnerabilities || [];
+    if (!detail.deprecated && !vulnerabilities.length && !transitiveVulnerabilities.length && detail.auditStatus !== 'unknown') {
       return '<section class="sideSection security okPanel"><h2>Security</h2><p>No deprecation or known vulnerabilities found for the resolved version.</p></section>';
     }
 
@@ -622,6 +626,24 @@
                 </div>
                 ${advisory.vulnerableVersions ? `<p>Vulnerable: ${escapeHtml(advisory.vulnerableVersions)}</p>` : ''}
                 ${advisory.patchedVersions ? `<p>Patched: ${escapeHtml(advisory.patchedVersions)}</p>` : ''}
+                ${advisory.url ? `<a href="${escapeAttr(advisory.url)}">Advisory</a>` : ''}
+              </article>
+            `).join('')}
+          </div>
+        ` : ''}
+        ${transitiveVulnerabilities.length ? `
+          <div class="advisories">
+            <h3>Transitive vulnerabilities</h3>
+            ${transitiveVulnerabilities.map((advisory) => `
+              <article class="advisory transitiveAdvisory ${escapeAttr(advisory.severity || 'unknown')}">
+                <div>
+                  <strong>${escapeHtml(advisory.packageName || 'dependency')}@${escapeHtml(advisory.packageVersion || '-')}</strong>
+                  <span>${escapeHtml(advisory.severity || 'unknown')}</span>
+                </div>
+                <p>${escapeHtml(advisory.title)}</p>
+                ${advisory.vulnerableVersions ? `<p>Vulnerable: ${escapeHtml(advisory.vulnerableVersions)}</p>` : ''}
+                ${advisory.patchedVersions ? `<p>Patched: ${escapeHtml(advisory.patchedVersions)}</p>` : ''}
+                ${advisory.packagePath ? `<p>Path: ${escapeHtml(advisory.packagePath)}</p>` : ''}
                 ${advisory.url ? `<a href="${escapeAttr(advisory.url)}">Advisory</a>` : ''}
               </article>
             `).join('')}

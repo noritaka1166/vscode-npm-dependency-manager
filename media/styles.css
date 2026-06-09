@@ -422,7 +422,8 @@ input {
   background: color-mix(in srgb, var(--vscode-testing-iconQueued) 16%, transparent);
 }
 
-.badge.vulnerable {
+.badge.vulnerable,
+.badge.transitive {
   color: var(--vscode-testing-iconFailed);
   background: color-mix(in srgb, var(--vscode-testing-iconFailed) 16%, transparent);
 }
@@ -714,8 +715,18 @@ small {
   gap: 8px;
 }
 
+.advisories h3 {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .advisory {
   border-left: 3px solid var(--vscode-testing-iconFailed);
+}
+
+.transitiveAdvisory {
+  border-left-color: var(--vscode-testing-iconQueued);
 }
 
 .advisory div {
