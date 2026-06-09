@@ -471,8 +471,9 @@ class NpmWorkspaceModel {
 
         const text = await response.text();
         if (isUsefulReadme(text)) {
-          this.readmeFallbackCache.set(name, text);
-          return text;
+          const readme = await resolveReadmeAssetUrls(text, url);
+          this.readmeFallbackCache.set(name, readme);
+          return readme;
         }
       } catch (error) {
         continue;
@@ -1175,6 +1176,130 @@ function normalizeAdvisory(advisory) {
 
 function renderReadmeHtml(readme) {
   return sanitizeReadmeHtml(markdown.render(String(readme || '')));
+}
+
+async function resolveReadmeAssetUrls(readme, readmeUrl) {
+  const baseUrl = getReadmeBaseUrl(readmeUrl);
+  if (!baseUrl) {
+    return readme;
+  }
+  const assetUrlMap = await getReadmeAssetUrlMap(readme, readmeUrl, baseUrl);
+
+  return String(readme || '')
+    .replace(/(!?\[[^\]]*]\()([^)\s]+)(\))/g, (match, prefix, url, suffix) => {
+      return `${prefix}${resolveReadmeUrl(url, baseUrl, assetUrlMap)}${suffix}`;
+    })
+    .replace(/^(\s*\[[^\]]+]:\s*)(\S+)/gm, (match, prefix, url) => {
+      return `${prefix}${resolveReadmeUrl(url, baseUrl, assetUrlMap)}`;
+    })
+    .replace(/\s(src|href)\s*=\s*(['"])([^'"]+)\2/gi, (match, attr, quote, url) => {
+      return ` ${attr}=${quote}${resolveReadmeUrl(url, baseUrl, assetUrlMap)}${quote}`;
+    })
+    .replace(/\ssrcset\s*=\s*(['"])([^'"]+)\1/gi, (match, quote, value) => {
+      const resolved = value.split(',').map((part) => {
+        const pieces = part.trim().split(/\s+/);
+        if (!pieces[0]) {
+          return '';
+        }
+        return [resolveReadmeUrl(pieces[0], baseUrl, assetUrlMap), ...pieces.slice(1)].join(' ');
+      }).filter(Boolean).join(', ');
+      return ` srcset=${quote}${resolved}${quote}`;
+    });
+}
+
+async function getReadmeAssetUrlMap(readme, readmeUrl, baseUrl) {
+  const rootBaseUrl = getGitHubRawRootBaseUrl(readmeUrl);
+  if (!rootBaseUrl || rootBaseUrl === baseUrl) {
+    return new Map();
+  }
+
+  const urls = getReadmeRelativeAssetUrls(readme);
+  const entries = await Promise.all(urls.map(async (url) => {
+    const primary = resolveReadmeUrl(url, baseUrl);
+    const fallback = resolveReadmeUrl(url, rootBaseUrl);
+    if (primary === fallback || await canFetchAsset(primary)) {
+      return [url, primary];
+    }
+    if (await canFetchAsset(fallback)) {
+      return [url, fallback];
+    }
+    return [url, primary];
+  }));
+  return new Map(entries);
+}
+
+function getReadmeRelativeAssetUrls(readme) {
+  const urls = new Set();
+  const patterns = [
+    /!\[[^\]]*]\(([^)\s]+)\)/g,
+    /\s(?:src|href)\s*=\s*['"]([^'"]+)['"]/gi,
+    /\ssrcset\s*=\s*['"]([^'"]+)['"]/gi
+  ];
+
+  patterns.forEach((pattern) => {
+    for (const match of String(readme || '').matchAll(pattern)) {
+      String(match[1] || '').split(',').forEach((part) => {
+        const url = part.trim().split(/\s+/)[0];
+        if (isRelativeAssetUrl(url)) {
+          urls.add(url);
+        }
+      });
+    }
+  });
+  return [...urls];
+}
+
+function isRelativeAssetUrl(url) {
+  return Boolean(url)
+    && !url.startsWith('#')
+    && !/^(https?:|mailto:|data:)/i.test(url)
+    && /\.(svg|png|jpe?g|gif|webp|avif)(?:[?#].*)?$/i.test(url);
+}
+
+function getGitHubRawRootBaseUrl(readmeUrl) {
+  const match = String(readmeUrl || '').match(/^(https:\/\/raw\.githubusercontent\.com\/[^/]+\/[^/]+\/[^/]+\/)/i);
+  return match ? match[1] : '';
+}
+
+async function canFetchAsset(url) {
+  try {
+    const response = await fetch(url, { method: 'HEAD' });
+    if (response.ok) {
+      return true;
+    }
+  } catch (error) {
+    // Some hosts reject HEAD. Fall through to GET.
+  }
+
+  try {
+    const response = await fetch(url);
+    return response.ok;
+  } catch (error) {
+    return false;
+  }
+}
+
+function getReadmeBaseUrl(readmeUrl) {
+  try {
+    return new URL('.', readmeUrl).href;
+  } catch (error) {
+    return '';
+  }
+}
+
+function resolveReadmeUrl(value, baseUrl, assetUrlMap = new Map()) {
+  const url = String(value || '').trim();
+  if (assetUrlMap.has(url)) {
+    return assetUrlMap.get(url);
+  }
+  if (!url || url.startsWith('#') || /^(https?:|mailto:|data:)/i.test(url)) {
+    return value;
+  }
+  try {
+    return new URL(url, baseUrl).href;
+  } catch (error) {
+    return value;
+  }
 }
 
 function isUsefulReadme(readme) {
