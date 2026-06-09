@@ -342,9 +342,10 @@ class NpmWorkspaceModel {
     const registry = await this.getRegistryPackage(name);
     const dependency = dependencyHint || this.findKnownDependency(name);
     const versionInfo = resolveVersionInfo(registry, dependency && (dependency.resolvedVersion || dependency.currentVersion));
-    const fallbackReadme = registry.readme ? '' : await this.getFallbackReadme(name, registry);
+    const useRegistryReadme = isUsefulReadme(registry.readme);
+    const fallbackReadme = useRegistryReadme ? '' : await this.getFallbackReadme(name, registry);
     const weeklyDownloads = await this.getWeeklyDownloads(name);
-    const readme = registry.readme || fallbackReadme || 'This package does not publish README content to the npm registry.';
+    const readme = useRegistryReadme ? registry.readme : (fallbackReadme || 'This package does not publish README content to the npm registry.');
     const resolvedVersion = dependency && dependency.resolvedVersion ? dependency.resolvedVersion : versionInfo.version;
     const updateInfo = getUpdateInfo(resolvedVersion, registry.latestVersion);
     const lockPackage = dependency && dependency.lockStatus ? dependency : this.lockInfo.packages.get(name);
@@ -469,7 +470,7 @@ class NpmWorkspaceModel {
         }
 
         const text = await response.text();
-        if (text.trim()) {
+        if (isUsefulReadme(text)) {
           this.readmeFallbackCache.set(name, text);
           return text;
         }
@@ -553,6 +554,7 @@ class NpmWorkspaceModel {
       time: data.time || {},
       versions: data.versions || {},
       readme: data.readme || '',
+      readmeFilename: data.readmeFilename || '',
       homepage: data.homepage || '',
       repository: normalizeRepository(data.repository),
       license: data.license || '',
@@ -1175,6 +1177,22 @@ function renderReadmeHtml(readme) {
   return sanitizeReadmeHtml(markdown.render(String(readme || '')));
 }
 
+function isUsefulReadme(readme) {
+  const text = String(readme || '').trim();
+  if (text.length < 80) {
+    return false;
+  }
+  if (isReadmePath(text)) {
+    return false;
+  }
+  return !/does not publish readme content|no readme/i.test(text);
+}
+
+function isReadmePath(value) {
+  const text = String(value || '').trim();
+  return /^[./\w@-][\w@./-]*readme\.(md|markdown|mdx|txt)$/i.test(text);
+}
+
 function sanitizeReadmeHtml(html) {
   return String(html || '')
     .replace(/<script\b[\s\S]*?<\/script>/gi, '')
@@ -1333,7 +1351,9 @@ function getGitHubReadmeCandidates(packageName, registry) {
 
   const unscopedName = packageName.split('/').at(-1);
   const packagePath = packageName.replace(/^@/, '');
+  const explicitReadmePath = getExplicitReadmePath(registry);
   const paths = [
+    explicitReadmePath ? explicitReadmePath.replace(/\/?readme\.(md|markdown|mdx|txt)$/i, '') : '',
     github.path,
     '',
     `packages/${unscopedName}`,
@@ -1342,16 +1362,25 @@ function getGitHubReadmeCandidates(packageName, registry) {
     packagePath
   ].filter((value, index, list) => value !== undefined && list.indexOf(value) === index);
 
-  const refs = [github.ref, 'main', 'master'].filter((value, index, list) => value && list.indexOf(value) === index);
+  const refs = [github.ref, 'canary', 'main', 'master'].filter((value, index, list) => value && list.indexOf(value) === index);
   return refs.flatMap((ref) =>
     paths.flatMap((readmePath) => {
       const prefix = readmePath ? `${readmePath.replace(/\/$/, '')}/` : '';
-      return [
+      const candidates = [
         `https://raw.githubusercontent.com/${github.owner}/${github.repo}/${ref}/${prefix}README.md`,
         `https://raw.githubusercontent.com/${github.owner}/${github.repo}/${ref}/${prefix}readme.md`
       ];
+      if (explicitReadmePath) {
+        candidates.unshift(`https://raw.githubusercontent.com/${github.owner}/${github.repo}/${ref}/${explicitReadmePath.replace(/^\//, '')}`);
+      }
+      return candidates;
     })
-  );
+  ).filter((url, index, list) => list.indexOf(url) === index);
+}
+
+function getExplicitReadmePath(registry) {
+  const candidates = [registry.readmeFilename, registry.readme];
+  return candidates.find(isReadmePath) || '';
 }
 
 function getGitHubRepoInfo(value) {
