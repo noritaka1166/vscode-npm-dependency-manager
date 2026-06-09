@@ -8,7 +8,7 @@
 
 body {
   margin: 0;
-  padding: 12px;
+  padding: 0 12px 12px;
   color: var(--vscode-foreground);
   background: var(--vscode-editor-background);
   font-family: var(--vscode-font-family);
@@ -25,8 +25,8 @@ input {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
-  align-items: start;
-  padding-bottom: 12px;
+  align-items: center;
+  padding: 12px 0;
   border-bottom: 1px solid var(--vscode-editorGroup-border, var(--vscode-widget-border));
 }
 
@@ -51,11 +51,32 @@ input {
   white-space: nowrap;
 }
 
+.headerActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.headerMeta {
+  overflow: hidden;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .controlPanel {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: grid;
   gap: 12px;
-  padding: 12px 0 14px;
+  margin: 0 -12px;
+  padding: 12px;
+  background: var(--vscode-editor-background);
   border-bottom: 1px solid var(--vscode-editorGroup-border, var(--vscode-widget-border));
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--vscode-editor-background) 68%, transparent);
 }
 
 .controlPrimary {
@@ -122,7 +143,8 @@ input {
 .segments {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  border: 1px solid var(--vscode-button-secondaryBackground);
+  background: var(--vscode-button-secondaryBackground);
+  border: 1px solid var(--vscode-widget-border, transparent);
   border-radius: 6px;
   overflow: hidden;
 }
@@ -141,9 +163,9 @@ input {
   padding: 3px 5px;
   overflow: hidden;
   color: var(--vscode-button-secondaryForeground);
-  background: var(--vscode-button-secondaryBackground);
+  background: transparent;
   border: 0;
-  border-right: 1px solid var(--vscode-sideBar-background);
+  border-right: 1px solid var(--vscode-widget-border, var(--vscode-sideBar-background));
   cursor: pointer;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -156,6 +178,7 @@ input {
 .segments button.active {
   color: var(--vscode-button-foreground);
   background: var(--vscode-button-background);
+  font-weight: 600;
 }
 
 .lockSummary {
@@ -214,7 +237,7 @@ input {
 }
 
 .dependencySection {
-  padding-top: 14px;
+  padding-top: 16px;
 }
 
 .sectionHeader {
@@ -240,7 +263,9 @@ input {
 
 .tableScroller {
   overflow-x: auto;
-  padding-bottom: 2px;
+  padding-bottom: 4px;
+  border: 1px solid var(--vscode-editorGroup-border, var(--vscode-widget-border));
+  border-radius: 6px;
 }
 
 .row {
@@ -248,17 +273,22 @@ input {
   grid-template-columns: minmax(116px, 1.25fr) 42px minmax(68px, .68fr) minmax(70px, .62fr) minmax(104px, .85fr) minmax(68px, .68fr) minmax(104px, .85fr) minmax(68px, .62fr) minmax(86px, .76fr);
   gap: 6px;
   align-items: center;
-  min-height: 34px;
-  padding: 6px;
-  background: var(--vscode-list-inactiveSelectionBackground, transparent);
-  border-radius: 4px;
+  min-height: 36px;
+  padding: 7px 8px;
+  background: transparent;
+  border-bottom: 1px solid color-mix(in srgb, var(--vscode-editorGroup-border, var(--vscode-widget-border)) 62%, transparent);
+}
+
+.row:last-child {
+  border-bottom: 0;
 }
 
 .row.head {
-  min-height: 26px;
+  min-height: 30px;
   color: var(--vscode-descriptionForeground);
-  background: transparent;
+  background: var(--vscode-editorWidget-background);
   font-size: 11px;
+  font-weight: 600;
 }
 
 .row.updateRow {
@@ -267,17 +297,17 @@ input {
 
 .row.majorUpdate {
   border-left-color: var(--vscode-testing-iconFailed);
-  background: color-mix(in srgb, var(--vscode-testing-iconFailed) 7%, var(--vscode-list-inactiveSelectionBackground, transparent));
+  background: color-mix(in srgb, var(--vscode-testing-iconFailed) 6%, transparent);
 }
 
 .row.minorUpdate {
   border-left-color: var(--vscode-testing-iconQueued);
-  background: color-mix(in srgb, var(--vscode-testing-iconQueued) 7%, var(--vscode-list-inactiveSelectionBackground, transparent));
+  background: color-mix(in srgb, var(--vscode-testing-iconQueued) 6%, transparent);
 }
 
 .row.patchUpdate {
   border-left-color: var(--vscode-charts-blue, var(--vscode-textLink-foreground));
-  background: color-mix(in srgb, var(--vscode-charts-blue, var(--vscode-textLink-foreground)) 7%, var(--vscode-list-inactiveSelectionBackground, transparent));
+  background: color-mix(in srgb, var(--vscode-charts-blue, var(--vscode-textLink-foreground)) 6%, transparent);
 }
 
 .name {
@@ -888,8 +918,7 @@ small {
 @media (max-width: 820px) {
   .dashboardHeader,
   .controlPrimary,
-  .filterGrid,
-  .statusGrid {
+  .filterGrid {
     grid-template-columns: 1fr;
   }
 
@@ -897,8 +926,9 @@ small {
     gap: 8px;
   }
 
-  .dashboardHeader .secondaryButton {
+  .headerActions {
     justify-self: start;
+    flex-wrap: wrap;
   }
 
   .segments.riskSegments,

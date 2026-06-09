@@ -60,7 +60,10 @@
           <h1>npm Packages</h1>
           <p>${escapeHtml(state.selectedLabel || state.selectedPackageJson || 'No package.json selected')}</p>
         </div>
-        <button id="refreshAllButton" class="secondaryButton" title="Clear cache and reload registry data">Refresh all</button>
+        <div class="headerActions">
+          <span class="headerMeta">${renderCompactStatus(state.lockInfo, state.cacheStats)}</span>
+          <button id="refreshAllButton" class="secondaryButton" title="Clear cache and reload registry data">Refresh all</button>
+        </div>
       </section>
 
       <section class="controlPanel">
@@ -112,10 +115,6 @@
           </div>
         </div>
 
-        <div class="statusGrid">
-          ${renderLockSummary(state.lockInfo)}
-          ${renderCacheSummary(state.cacheStats)}
-        </div>
       </section>
 
       <section class="dependencySection">
@@ -464,6 +463,15 @@
     }, 0);
 
     return `<div class="cacheSummary"><span>cache</span><strong>${formatNumber(total)} entries</strong><small>registry ${formatNumber(stats.registry || 0)} / audit ${formatNumber(stats.audit || 0)} / downloads ${formatNumber(stats.downloads || 0)}</small></div>`;
+  }
+
+  function renderCompactStatus(lockInfo, cacheStats) {
+    const stats = cacheStats || {};
+    const cacheTotal = ['registry', 'dependencies', 'audit', 'readme', 'downloads'].reduce((sum, key) => {
+      return sum + (Number.isFinite(stats[key]) ? stats[key] : 0);
+    }, 0);
+    const lockLabel = lockInfo && lockInfo.exists ? `lock v${lockInfo.lockfileVersion || '?'}` : 'no lock';
+    return `${escapeHtml(lockLabel)} / cache ${formatNumber(cacheTotal)}`;
   }
 
   function renderLockSummary(lockInfo) {
