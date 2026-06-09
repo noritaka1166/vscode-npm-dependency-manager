@@ -577,12 +577,18 @@ small {
 }
 
 .packageHeader {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);
   gap: 12px;
   align-items: start;
-  padding: 10px 0 18px;
+  margin: 0 -12px;
+  padding: 10px 12px 14px;
+  background: var(--vscode-editor-background);
   border-bottom: 1px solid var(--vscode-editorGroup-border, var(--vscode-widget-border));
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--vscode-editor-background) 68%, transparent);
 }
 
 .backButton {
@@ -603,6 +609,7 @@ small {
 
 .packageTitleLine h1 {
   margin: 0;
+  min-width: 0;
   overflow-wrap: anywhere;
   font-size: 26px;
   font-weight: 600;
@@ -613,8 +620,11 @@ small {
 .packageIdentity p {
   max-width: 760px;
   margin: 6px 0 0;
+  overflow: hidden;
   color: var(--vscode-descriptionForeground);
   line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .packageRisk {
@@ -626,7 +636,7 @@ small {
   grid-template-columns: minmax(0, 1fr) 268px;
   gap: 28px;
   align-items: start;
-  padding-top: 18px;
+  padding-top: 16px;
 }
 
 .readmePanel {
