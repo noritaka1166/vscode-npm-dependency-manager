@@ -1,15 +1,40 @@
 {
-  "name": "workspace-npm-sidebar",
-  "displayName": "Workspace npm Sidebar",
-  "description": "Browse package.json dependencies from the VS Code sidebar and compare them with npm registry versions.",
+  "name": "npm-dependency-manager",
+  "displayName": "npm-dependency-manager",
+  "description": "Inspect workspace npm dependencies, updates, package-lock data, README content, and vulnerability signals from the VS Code sidebar.",
   "version": "0.0.1",
-  "publisher": "local",
+  "publisher": "noritaka1166",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#102333",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/noritaka1166/vscode-npm-dependency-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/noritaka1166/vscode-npm-dependency-manager/issues"
+  },
+  "homepage": "https://github.com/noritaka1166/vscode-npm-dependency-manager#readme",
   "engines": {
     "vscode": "^1.90.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Visualization"
   ],
+  "keywords": [
+    "npm",
+    "dependencies",
+    "package.json",
+    "package-lock",
+    "vulnerability",
+    "audit",
+    "updates"
+  ],
+  "qna": false,
   "activationEvents": [
     "onView:workspaceNpmSidebar.dependenciesView",
     "onCommand:workspaceNpmSidebar.show",
@@ -18,7 +43,10 @@
   ],
   "main": "./extension.js",
   "scripts": {
-    "check": "node --check extension.js && node --check media/main.js"
+    "check": "node --check extension.js && node --check media/main.js",
+    "vscode:prepublish": "npm run check",
+    "package": "npx @vscode/vsce package",
+    "publish": "npx @vscode/vsce publish"
   },
   "contributes": {
     "viewsContainers": {
