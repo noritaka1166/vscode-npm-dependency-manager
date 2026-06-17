@@ -2,6 +2,8 @@
 
 npm-dependency-manager helps you inspect npm dependencies without leaving VS Code. It finds `package.json` files in the current workspace, shows the selected package list in the activity bar, and opens a richer dashboard in the editor for updates, lockfile data, README content, downloads, and security signals.
 
+![npm-dependency-manager demo](https://raw.githubusercontent.com/noritaka1166/vscode-npm-dependency-manager/main/media/demo.gif)
+
 ## Features
 
 - Finds workspace `package.json` files and prefers the workspace root `package.json` by default.
