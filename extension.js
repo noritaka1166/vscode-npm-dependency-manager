@@ -65,6 +65,7 @@ class NpmWorkspaceModel {
     this.filter = 'all';
     this.riskFilter = 'all';
     this.updateFilter = 'all';
+    this.licenseFilter = 'all';
     this.searchQuery = '';
     this.dependencies = [];
     this.allDependencies = [];
@@ -180,6 +181,11 @@ class NpmWorkspaceModel {
     this.applyDependencyView(true, 'update');
   }
 
+  async setLicenseFilter(filter) {
+    this.licenseFilter = filter || 'all';
+    this.applyDependencyView(true, 'license');
+  }
+
   async loadDependencies() {
     if (!this.selectedPackageJson) {
       await this.refresh();
@@ -207,7 +213,7 @@ class NpmWorkspaceModel {
 
   applyDependencyView(emit = true, reason = 'state') {
     this.dependencies = filterDependencyEntries(
-      filterDependencyUpdate(filterDependencyRisk(filterDependencyType(this.allDependencies, this.filter), this.riskFilter), this.updateFilter),
+      filterDependencyLicense(filterDependencyUpdate(filterDependencyRisk(filterDependencyType(this.allDependencies, this.filter), this.riskFilter), this.updateFilter), this.licenseFilter),
       this.searchQuery
     );
 
@@ -236,6 +242,7 @@ class NpmWorkspaceModel {
       lockOptional: Boolean(lockPackage && lockPackage.optional),
       lockPeer: Boolean(lockPackage && lockPackage.peer),
       description: registry.description,
+      license: normalizeLicenseValue(versionInfo.manifest && versionInfo.manifest.license ? versionInfo.manifest.license : registry.license),
       npmUrl: `https://www.npmjs.com/package/${entry.name}`,
       status: getVersionStatus(entry.currentVersion, registry.latestVersion),
       updateType: updateInfo.type,
@@ -587,6 +594,8 @@ class NpmWorkspaceModel {
       filter: this.filter,
       riskFilter: this.riskFilter,
       updateFilter: this.updateFilter,
+      licenseFilter: this.licenseFilter,
+      licenseOptions: getLicenseOptions(filterDependencyType(this.allDependencies, this.filter)),
       searchQuery: this.searchQuery,
       dependencyCounts: this.dependencyCounts,
       cacheStats: this.getCacheStats(),
@@ -778,6 +787,9 @@ class DashboardPanel {
             break;
           case 'setUpdateFilter':
             await this.model.setUpdateFilter(message.filter);
+            break;
+          case 'setLicenseFilter':
+            await this.model.setLicenseFilter(message.filter);
             break;
           case 'refreshAll':
             await this.model.refreshFromNetwork();
@@ -1163,6 +1175,55 @@ function filterDependencyUpdate(entries, filter) {
     }
     return entry.updateType === filter;
   });
+}
+
+function filterDependencyLicense(entries, filter) {
+  if (!filter || filter === 'all') {
+    return entries;
+  }
+
+  return entries.filter((entry) => getLicenseFilterValue(entry.license) === filter);
+}
+
+function getLicenseOptions(entries) {
+  const counts = new Map();
+  entries.forEach((entry) => {
+    const value = getLicenseFilterValue(entry.license);
+    counts.set(value, (counts.get(value) || 0) + 1);
+  });
+
+  return [...counts.entries()]
+    .map(([value, count]) => ({
+      value,
+      label: value === '__unknown__' ? 'Unknown' : value,
+      count
+    }))
+    .sort((a, b) => {
+      if (a.value === '__unknown__') {
+        return 1;
+      }
+      if (b.value === '__unknown__') {
+        return -1;
+      }
+      return a.label.localeCompare(b.label);
+    });
+}
+
+function getLicenseFilterValue(license) {
+  const value = normalizeLicenseValue(license);
+  return value || '__unknown__';
+}
+
+function normalizeLicenseValue(license) {
+  if (Array.isArray(license)) {
+    return license.map(normalizeLicenseValue).filter(Boolean).join(', ');
+  }
+
+  if (license && typeof license === 'object') {
+    return normalizeLicenseValue(license.type || license.name || '');
+  }
+
+  return String(license || '').trim();
 }
 
 function getDependencyCounts(packageJson) {

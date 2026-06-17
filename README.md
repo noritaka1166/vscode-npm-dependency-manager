@@ -9,6 +9,7 @@ npm-dependency-manager helps you inspect npm dependencies without leaving VS Cod
 - Expands packages in the sidebar to browse transitive dependencies from npm registry metadata.
 - Searches package names and descriptions without refetching registry data.
 - Filters by `dependencies`, `devDependencies`, vulnerable packages, deprecated packages, unknown audit state, healthy packages, and update candidates.
+- Shows package licenses in the dependency list and filters by detected license.
 - Compares the requested version, package-lock resolved version, latest version, and publish dates.
 - Highlights major, minor, and patch update candidates.
 - Runs guarded update actions from the list or package detail page with a confirmation prompt.

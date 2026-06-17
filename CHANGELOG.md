@@ -5,6 +5,9 @@
 - Added update actions for outdated dependencies from the package list and package detail page.
 - Added a confirmation prompt before running npm update commands.
 - Added a copy-command path for reviewing or running the generated npm install command manually.
+- Added license values to the dependency list.
+- Added a license filter populated from licenses detected in the selected package.json.
+- Added unknown-license handling for packages that do not publish license metadata.
 
 ## 0.0.1
 

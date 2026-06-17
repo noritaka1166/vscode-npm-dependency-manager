@@ -7,6 +7,8 @@
     filter: 'all',
     riskFilter: 'all',
     updateFilter: 'all',
+    licenseFilter: 'all',
+    licenseOptions: [],
     searchQuery: '',
     dependencyCounts: {
       dependencies: 0,
@@ -113,6 +115,13 @@
               ${updateSegment('current', 'Current')}
             </div>
           </div>
+
+          <label class="field licenseField">
+            <span>License</span>
+            <select id="licenseSelect">
+              ${renderLicenseOptions()}
+            </select>
+          </label>
         </div>
 
       </section>
@@ -168,6 +177,15 @@
       });
     });
 
+    const licenseSelect = document.getElementById('licenseSelect');
+    if (licenseSelect) {
+      licenseSelect.addEventListener('change', (event) => {
+        state.licenseFilter = event.target.value;
+        updateDependencyTable();
+        vscode.postMessage({ type: 'setLicenseFilter', filter: event.target.value });
+      });
+    }
+
     const searchInput = document.getElementById('searchInput');
     if (searchInput) {
       let searchTimer;
@@ -216,7 +234,7 @@
 
   function getVisibleDependencies() {
     const query = String(state.searchQuery || '').trim().toLowerCase();
-    const filtered = filterByUpdate(filterByRisk(state.dependencies, state.riskFilter), state.updateFilter);
+    const filtered = filterByLicense(filterByUpdate(filterByRisk(state.dependencies, state.riskFilter), state.updateFilter), state.licenseFilter);
     if (!query) {
       return filtered;
     }
@@ -261,6 +279,14 @@
     });
   }
 
+  function filterByLicense(dependencies, licenseFilter) {
+    if (!licenseFilter || licenseFilter === 'all') {
+      return dependencies;
+    }
+
+    return dependencies.filter((dependency) => getLicenseFilterValue(dependency.license) === licenseFilter);
+  }
+
   function renderDependencyTable(dependencies) {
     if (!dependencies.length) {
       return '<p class="empty">No packages match this filter or search.</p>';
@@ -272,6 +298,7 @@
         <div class="row head">
           <span>Package</span>
           <span>Type</span>
+          <span>License</span>
           <span>Current</span>
           <span>Lock</span>
           <span>Current published</span>
@@ -287,6 +314,7 @@
               ${escapeHtml(dependency.name)}
             </button>
             <span class="pill">${dependency.type === 'dependencies' ? 'dep' : 'dev'}</span>
+            <span class="licenseCell">${renderLicense(dependency.license)}</span>
             <span class="version">${escapeHtml(dependency.currentVersion)}</span>
             <span class="lockCell">${renderLockBadge(dependency)}</span>
             <span class="version">${renderDate(dependency.resolvedPublishedAt)}</span>
@@ -460,6 +488,15 @@
     return `<button data-update-filter="${value}" class="${state.updateFilter === value ? 'active' : ''}">${escapeHtml(label)}</button>`;
   }
 
+  function renderLicenseOptions() {
+    const options = Array.isArray(state.licenseOptions) ? state.licenseOptions : [];
+    const selected = state.licenseFilter || 'all';
+    return [
+      `<option value="all" ${selected === 'all' ? 'selected' : ''}>All licenses</option>`,
+      ...options.map((option) => `<option value="${escapeAttr(option.value)}" ${selected === option.value ? 'selected' : ''}>${escapeHtml(option.label)}</option>`)
+    ].join('');
+  }
+
   function updateRiskSegments() {
     document.querySelectorAll('[data-risk-filter]').forEach((button) => {
       button.classList.toggle('active', button.dataset.riskFilter === state.riskFilter);
@@ -605,6 +642,22 @@
     const type = dependency.updateType || (dependency.status === 'update' ? 'unknown' : 'current');
     const label = dependency.updateLabel || type;
     return `<span class="updateBadge ${escapeAttr(type)}">${escapeHtml(label)}</span>`;
+  }
+
+  function renderLicense(license) {
+    const value = getLicenseDisplayValue(license);
+    const className = value === 'Unknown' ? 'unknown' : 'known';
+    return `<span class="licenseBadge ${className}" title="${escapeAttr(value)}">${escapeHtml(value)}</span>`;
+  }
+
+  function getLicenseFilterValue(license) {
+    const value = getLicenseDisplayValue(license);
+    return value === 'Unknown' ? '__unknown__' : value;
+  }
+
+  function getLicenseDisplayValue(license) {
+    const value = String(license || '').trim();
+    return value || 'Unknown';
   }
 
   function renderUpdateAction(dependency) {

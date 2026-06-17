@@ -270,7 +270,7 @@ input {
 
 .row {
   display: grid;
-  grid-template-columns: minmax(116px, 1.25fr) 42px minmax(68px, .68fr) minmax(70px, .62fr) minmax(104px, .85fr) minmax(68px, .68fr) minmax(104px, .85fr) minmax(68px, .62fr) minmax(86px, .76fr) 72px;
+  grid-template-columns: minmax(116px, 1.2fr) 42px minmax(86px, .72fr) minmax(68px, .62fr) minmax(70px, .58fr) minmax(104px, .82fr) minmax(68px, .62fr) minmax(104px, .82fr) minmax(68px, .58fr) minmax(86px, .72fr) 72px;
   gap: 6px;
   align-items: center;
   min-height: 36px;
@@ -341,6 +341,31 @@ input {
   background: var(--vscode-badge-background);
   border-radius: 4px;
   font-size: 11px;
+}
+
+.licenseCell {
+  min-width: 0;
+}
+
+.licenseBadge {
+  display: inline-block;
+  max-width: 100%;
+  padding: 2px 6px;
+  overflow: hidden;
+  color: var(--vscode-badge-foreground);
+  background: color-mix(in srgb, var(--vscode-badge-background) 78%, transparent);
+  border: 1px solid color-mix(in srgb, var(--vscode-badge-background) 72%, var(--vscode-widget-border, transparent));
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.licenseBadge.unknown {
+  color: var(--vscode-descriptionForeground);
+  background: var(--vscode-editorWidget-background);
+  border-color: var(--vscode-widget-border, transparent);
 }
 
 .lockCell {
