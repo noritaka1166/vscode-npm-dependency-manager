@@ -11,6 +11,7 @@ npm-dependency-manager helps you inspect npm dependencies without leaving VS Cod
 - Filters by `dependencies`, `devDependencies`, vulnerable packages, deprecated packages, unknown audit state, healthy packages, and update candidates.
 - Compares the requested version, package-lock resolved version, latest version, and publish dates.
 - Highlights major, minor, and patch update candidates.
+- Runs guarded update actions from the list or package detail page with a confirmation prompt.
 - Reads `package-lock.json` for resolved versions, lock paths, and dependency tree context.
 - Checks npm audit bulk advisories for direct and transitive vulnerabilities when a resolved version is available.
 - Shows deprecated package messages from npm registry metadata.

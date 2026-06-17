@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.0.2
+
+- Added update actions for outdated dependencies from the package list and package detail page.
+- Added a confirmation prompt before running npm update commands.
+- Added a copy-command path for reviewing or running the generated npm install command manually.
+
 ## 0.0.1
 
 Initial Marketplace-ready release.

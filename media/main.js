@@ -195,9 +195,21 @@
   }
 
   function bindPackageButtons() {
-    document.querySelectorAll('[data-package]').forEach((button) => {
+    document.querySelectorAll('.name[data-package]').forEach((button) => {
       button.addEventListener('click', () => {
         vscode.postMessage({ type: 'openPackage', name: button.dataset.package });
+      });
+    });
+
+    document.querySelectorAll('[data-update-package]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        vscode.postMessage({
+          type: 'runUpdate',
+          name: button.dataset.updatePackage,
+          version: button.dataset.updateVersion,
+          dependencyType: button.dataset.dependencyType
+        });
       });
     });
   }
@@ -267,6 +279,7 @@
           <span>Latest published</span>
           <span>Update</span>
           <span>Risk</span>
+          <span>Action</span>
         </div>
         ${dependencies.map((dependency) => `
           <div class="row ${getUpdateRowClass(dependency)}">
@@ -281,6 +294,7 @@
             <span class="version">${renderDate(dependency.latestPublishedAt)}</span>
             <span class="update">${renderUpdate(dependency)}</span>
             <span class="risk">${renderRisk(dependency)}</span>
+            <span class="actionCell">${renderUpdateAction(dependency)}</span>
           </div>
         `).join('')}
         </div>
@@ -313,6 +327,7 @@
             <section class="sideSection">
               <h2>Install</h2>
               <code class="installCommand">npm i ${escapeHtml(detail.name)}</code>
+              ${renderDetailUpdateAction(detail)}
             </section>
 
             <section class="sideSection">
@@ -372,6 +387,7 @@
     document.getElementById('refreshPackageButton').addEventListener('click', (event) => {
       vscode.postMessage({ type: 'refreshPackage', name: event.currentTarget.dataset.package });
     });
+    bindPackageButtons();
     bindReadmeLinks();
   }
 
@@ -589,6 +605,41 @@
     const type = dependency.updateType || (dependency.status === 'update' ? 'unknown' : 'current');
     const label = dependency.updateLabel || type;
     return `<span class="updateBadge ${escapeAttr(type)}">${escapeHtml(label)}</span>`;
+  }
+
+  function renderUpdateAction(dependency) {
+    if (!canUpdateDependency(dependency)) {
+      return '<span class="mutedDash">-</span>';
+    }
+
+    return `<button class="secondaryButton compactButton updateButton" data-update-package="${escapeAttr(dependency.name)}" data-update-version="${escapeAttr(dependency.latestVersion)}" data-dependency-type="${escapeAttr(dependency.type || '')}" title="Update ${escapeAttr(dependency.name)} to ${escapeAttr(dependency.latestVersion)}">Update</button>`;
+  }
+
+  function renderDetailUpdateAction(detail) {
+    if (!canUpdateDependency(detail)) {
+      return '';
+    }
+
+    const scope = detail.type === 'devDependencies' ? 'devDependency' : 'dependency';
+    return `
+      <div class="installAction">
+        <button class="secondaryButton updateButton" data-update-package="${escapeAttr(detail.name)}" data-update-version="${escapeAttr(detail.latestVersion)}" data-dependency-type="${escapeAttr(detail.type || '')}">
+          Update to ${escapeHtml(detail.latestVersion)}
+        </button>
+        <small>Runs as a ${escapeHtml(scope)} update in the selected package.json directory.</small>
+      </div>
+    `;
+  }
+
+  function canUpdateDependency(dependency) {
+    return Boolean(
+      dependency &&
+      dependency.name &&
+      dependency.latestVersion &&
+      !dependency.parentName &&
+      !dependency.dependencyDepth &&
+      ['major', 'minor', 'patch'].includes(dependency.updateType)
+    );
   }
 
   function getUpdateRowClass(dependency) {

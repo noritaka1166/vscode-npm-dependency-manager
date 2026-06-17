@@ -270,7 +270,7 @@ input {
 
 .row {
   display: grid;
-  grid-template-columns: minmax(116px, 1.25fr) 42px minmax(68px, .68fr) minmax(70px, .62fr) minmax(104px, .85fr) minmax(68px, .68fr) minmax(104px, .85fr) minmax(68px, .62fr) minmax(86px, .76fr);
+  grid-template-columns: minmax(116px, 1.25fr) 42px minmax(68px, .68fr) minmax(70px, .62fr) minmax(104px, .85fr) minmax(68px, .68fr) minmax(104px, .85fr) minmax(68px, .62fr) minmax(86px, .76fr) 72px;
   gap: 6px;
   align-items: center;
   min-height: 36px;
@@ -571,6 +571,21 @@ small {
   font-size: 11px;
 }
 
+.actionCell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.updateButton {
+  white-space: nowrap;
+}
+
+.mutedDash {
+  color: var(--vscode-descriptionForeground);
+}
+
 .detailPage {
   max-width: 1180px;
   margin: 0 auto;
@@ -685,6 +700,17 @@ small {
   border: 1px solid var(--vscode-widget-border, transparent);
   border-radius: 6px;
   white-space: nowrap;
+}
+
+.installAction {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.installAction small {
+  color: var(--vscode-descriptionForeground);
+  line-height: 1.4;
 }
 
 .integrity {

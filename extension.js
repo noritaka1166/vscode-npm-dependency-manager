@@ -378,6 +378,7 @@ class NpmWorkspaceModel {
     return {
       name,
       description: registry.description,
+      type: dependency && dependency.type ? dependency.type : '',
       currentVersion: dependency && dependency.currentVersion ? dependency.currentVersion : '',
       latestVersion: registry.latestVersion,
       resolvedVersion,
@@ -602,6 +603,35 @@ class NpmWorkspaceModel {
     };
   }
 
+  createUpdateCommand(message) {
+    const name = String(message && message.name ? message.name : '').trim();
+    const version = String(message && message.version ? message.version : '').trim();
+    if (!name || !version) {
+      throw new Error('Package name and latest version are required to build an update command.');
+    }
+
+    if (!this.selectedPackageJson) {
+      throw new Error('Select a package.json before running an update.');
+    }
+
+    const knownDependency = this.allDependencies.find((dependency) => dependency.name === name);
+    if (!knownDependency) {
+      throw new Error(`${name} is not a direct dependency in the selected package.json.`);
+    }
+
+    const effectiveType = knownDependency.type || 'dependencies';
+    const saveFlag = effectiveType === 'devDependencies' ? '--save-dev' : '--save';
+    const specifier = `${name}@${version}`;
+    const command = `npm install ${shellQuote(specifier)} ${saveFlag}`;
+
+    return {
+      name,
+      version,
+      command,
+      cwd: path.dirname(this.selectedPackageJson)
+    };
+  }
+
   emit(reason = 'state') {
     this.emitter.fire(reason);
   }
@@ -758,6 +788,9 @@ class DashboardPanel {
           case 'openPackage':
             await this.showPackage(message.name);
             break;
+          case 'runUpdate':
+            await this.runUpdate(message);
+            break;
           case 'backToList':
             this.update();
             break;
@@ -786,6 +819,33 @@ class DashboardPanel {
     const dependency = await this.model.refreshPackage(name);
     const detail = await this.model.getDetail(name, dependency);
     this.post({ type: 'detail', detail });
+  }
+
+  async runUpdate(message) {
+    const command = this.model.createUpdateCommand(message);
+    const selection = await vscode.window.showWarningMessage(
+      `Run ${command.command}?`,
+      { modal: true, detail: `This will update ${command.name} in ${command.cwd}.` },
+      'Run command',
+      'Copy command'
+    );
+
+    if (selection === 'Copy command') {
+      await vscode.env.clipboard.writeText(command.command);
+      vscode.window.showInformationMessage(`Copied: ${command.command}`);
+      return;
+    }
+
+    if (selection !== 'Run command') {
+      return;
+    }
+
+    const terminal = vscode.window.createTerminal({
+      name: 'npm dependency update',
+      cwd: command.cwd
+    });
+    terminal.show();
+    terminal.sendText(command.command, true);
   }
 
   update() {
@@ -1561,6 +1621,10 @@ async function mapWithConcurrency(items, limit, mapper) {
 
 function getErrorMessage(error) {
   return error && error.message ? error.message : String(error);
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
 function getNonce() {
