@@ -7,6 +7,10 @@ const PANEL_TYPE = 'workspaceNpmSidebar.dashboard';
 const REGISTRY_BASE_URL = 'https://registry.npmjs.org';
 const AUDIT_BULK_URL = `${REGISTRY_BASE_URL}/-/npm/v1/security/advisories/bulk`;
 const DOWNLOADS_API_BASE_URL = 'https://api.npmjs.org/downloads/point/last-week';
+const OSV_QUERY_BATCH_URL = 'https://api.osv.dev/v1/querybatch';
+const OSV_VULN_URL = 'https://api.osv.dev/v1/vulns';
+const EPSS_API_URL = 'https://api.first.org/data/v1/epss';
+const CISA_KEV_URL = 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json';
 const markdown = new MarkdownIt({
   html: true,
   linkify: true,
@@ -78,6 +82,10 @@ class NpmWorkspaceModel {
     this.registryCache = new Map();
     this.dependencyCache = new Map();
     this.auditCache = new Map();
+    this.osvCache = new Map();
+    this.osvDetailCache = new Map();
+    this.epssCache = new Map();
+    this.kevCatalogCache = undefined;
     this.readmeFallbackCache = new Map();
     this.downloadCache = new Map();
     this.emitter = new vscode.EventEmitter();
@@ -115,6 +123,10 @@ class NpmWorkspaceModel {
     this.registryCache.clear();
     this.dependencyCache.clear();
     this.auditCache.clear();
+    this.osvCache.clear();
+    this.osvDetailCache.clear();
+    this.epssCache.clear();
+    this.kevCatalogCache = undefined;
     this.readmeFallbackCache.clear();
     this.downloadCache.clear();
   }
@@ -124,6 +136,10 @@ class NpmWorkspaceModel {
     this.readmeFallbackCache.delete(name);
     this.downloadCache.delete(name);
     this.auditCache.clear();
+    this.osvCache.clear();
+    this.osvDetailCache.clear();
+    this.epssCache.clear();
+    this.kevCatalogCache = undefined;
     [...this.dependencyCache.keys()].forEach((key) => {
       if (key.startsWith(`${name}@`)) {
         this.dependencyCache.delete(key);
@@ -258,8 +274,11 @@ class NpmWorkspaceModel {
       if (!dependency.resolvedVersion) {
         dependency.auditStatus = 'unknown';
         dependency.vulnerabilities = [];
+        dependency.osvVulnerabilities = [];
         dependency.transitiveVulnerabilities = [];
+        dependency.transitiveOsvVulnerabilities = [];
         dependency.transitiveVulnerabilityCount = 0;
+        dependency.securitySignals = { cves: [], kev: [], epss: [], maxEpss: null };
         return;
       }
 
@@ -271,23 +290,33 @@ class NpmWorkspaceModel {
 
     const auditResult = await this.getAuditAdvisories(auditInput);
     const lockAuditResult = this.lockInfo.exists ? await this.getAuditAdvisories(getLockAuditInput(this.lockInfo)) : new Map();
+    const osvResult = await this.getOsvVulnerabilitiesForDependencies(dependencies);
+    const lockOsvResult = this.lockInfo.exists ? await this.getOsvVulnerabilitiesForLock(this.lockInfo) : new Map();
+    const threatIntel = await this.getThreatIntelForCves(collectCvesFromSecurityResults(auditResult, osvResult, lockAuditResult, lockOsvResult));
     dependencies.forEach((dependency) => {
       if (!dependency.resolvedVersion) {
         return;
       }
 
       dependency.vulnerabilities = auditResult.get(dependency.name) || [];
+      dependency.osvVulnerabilities = osvResult.get(getPackageVersionKey(dependency.name, dependency.resolvedVersion)) || [];
+      const auditUnknown = dependency.vulnerabilities.length && dependency.vulnerabilities.every((advisory) => advisory.auditError);
       if (dependency.vulnerabilities.length && dependency.vulnerabilities.every((advisory) => advisory.auditError)) {
         dependency.auditStatus = 'unknown';
         dependency.auditError = dependency.vulnerabilities[0] && dependency.vulnerabilities[0].title;
         dependency.vulnerabilities = [];
-        return;
       }
-      dependency.auditStatus = dependency.vulnerabilities.length ? 'vulnerable' : 'ok';
-      dependency.maxSeverity = getMaxSeverity(dependency.vulnerabilities);
+      dependency.auditStatus = auditUnknown && !dependency.osvVulnerabilities.length ? 'unknown' : (dependency.vulnerabilities.length || dependency.osvVulnerabilities.length ? 'vulnerable' : 'ok');
       dependency.transitiveVulnerabilities = getTransitiveVulnerabilities(this.lockInfo, dependency, lockAuditResult);
       dependency.transitiveVulnerabilityCount = dependency.transitiveVulnerabilities.length;
-      dependency.transitiveMaxSeverity = getMaxSeverity(dependency.transitiveVulnerabilities);
+      dependency.transitiveOsvVulnerabilities = getTransitiveOsvVulnerabilities(this.lockInfo, dependency, lockOsvResult);
+      dependency.transitiveVulnerabilityCount += dependency.transitiveOsvVulnerabilities.length;
+      dependency.securitySignals = buildSecuritySignals(
+        [...dependency.vulnerabilities, ...dependency.osvVulnerabilities, ...dependency.transitiveVulnerabilities, ...dependency.transitiveOsvVulnerabilities],
+        threatIntel
+      );
+      dependency.maxSeverity = getMaxSeverity([...dependency.vulnerabilities, ...dependency.osvVulnerabilities]);
+      dependency.transitiveMaxSeverity = getMaxSeverity([...dependency.transitiveVulnerabilities, ...dependency.transitiveOsvVulnerabilities]);
     });
   }
 
@@ -345,6 +374,192 @@ class NpmWorkspaceModel {
     return result;
   }
 
+  async getOsvVulnerabilitiesForDependencies(dependencies) {
+    return this.getOsvVulnerabilities(
+      dependencies
+        .filter((dependency) => dependency.name && dependency.resolvedVersion)
+        .map((dependency) => ({ name: dependency.name, version: dependency.resolvedVersion }))
+    );
+  }
+
+  async getOsvVulnerabilitiesForLock(lockInfo) {
+    if (!lockInfo || !lockInfo.paths) {
+      return new Map();
+    }
+
+    const packages = [];
+    lockInfo.paths.forEach((packageInfo) => {
+      if (packageInfo.name && packageInfo.version) {
+        packages.push({ name: packageInfo.name, version: packageInfo.version });
+      }
+    });
+
+    return this.getOsvVulnerabilities(packages);
+  }
+
+  async getOsvVulnerabilities(packages) {
+    const uniquePackages = [...new Map((packages || [])
+      .filter((packageInfo) => packageInfo.name && packageInfo.version)
+      .map((packageInfo) => [getPackageVersionKey(packageInfo.name, packageInfo.version), packageInfo])).values()];
+    const result = new Map();
+    const missing = [];
+
+    uniquePackages.forEach((packageInfo) => {
+      const key = getPackageVersionKey(packageInfo.name, packageInfo.version);
+      if (this.osvCache.has(key)) {
+        result.set(key, this.osvCache.get(key));
+      } else {
+        missing.push(packageInfo);
+      }
+    });
+
+    for (const chunk of chunkArray(missing, 100)) {
+      let data;
+      try {
+        const response = await fetch(OSV_QUERY_BATCH_URL, {
+          method: 'POST',
+          headers: {
+            accept: 'application/json',
+            'content-type': 'application/json'
+          },
+          body: JSON.stringify({
+            queries: chunk.map((packageInfo) => ({
+              package: {
+                ecosystem: 'npm',
+                name: packageInfo.name
+              },
+              version: packageInfo.version
+            }))
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`OSV returned ${response.status}`);
+        }
+        data = await response.json();
+      } catch (error) {
+        chunk.forEach((packageInfo) => {
+          const key = getPackageVersionKey(packageInfo.name, packageInfo.version);
+          this.osvCache.set(key, []);
+          result.set(key, []);
+        });
+        continue;
+      }
+
+      await Promise.all(chunk.map(async (packageInfo, index) => {
+        const key = getPackageVersionKey(packageInfo.name, packageInfo.version);
+        const vulns = data && data.results && data.results[index] && Array.isArray(data.results[index].vulns) ? data.results[index].vulns : [];
+        const detailed = await this.getOsvVulnerabilityDetails(vulns.map((vuln) => vuln.id).filter(Boolean));
+        const normalized = detailed.map((vuln) => normalizeOsvVulnerability(vuln, packageInfo)).filter(Boolean);
+        this.osvCache.set(key, normalized);
+        result.set(key, normalized);
+      }));
+    }
+
+    return result;
+  }
+
+  async getOsvVulnerabilityDetails(ids) {
+    const uniqueIds = [...new Set(ids || [])];
+    const details = [];
+
+    await Promise.all(uniqueIds.map(async (id) => {
+      if (this.osvDetailCache.has(id)) {
+        details.push(this.osvDetailCache.get(id));
+        return;
+      }
+
+      try {
+        const response = await fetch(`${OSV_VULN_URL}/${encodeURIComponent(id)}`, {
+          headers: { accept: 'application/json' }
+        });
+        if (!response.ok) {
+          throw new Error(`OSV detail returned ${response.status}`);
+        }
+        const detail = await response.json();
+        this.osvDetailCache.set(id, detail);
+        details.push(detail);
+      } catch (error) {
+        this.osvDetailCache.set(id, null);
+      }
+    }));
+
+    return details.filter(Boolean);
+  }
+
+  async getThreatIntelForCves(cves) {
+    const uniqueCves = [...new Set((cves || []).filter(isCveId))];
+    const epss = await this.getEpssScores(uniqueCves);
+    const kev = await this.getKevCatalog();
+
+    return {
+      epss,
+      kev
+    };
+  }
+
+  async getEpssScores(cves) {
+    const result = new Map();
+    const missing = [];
+    (cves || []).forEach((cve) => {
+      if (this.epssCache.has(cve)) {
+        result.set(cve, this.epssCache.get(cve));
+      } else {
+        missing.push(cve);
+      }
+    });
+
+    for (const chunk of chunkArray(missing, 100)) {
+      try {
+        const url = `${EPSS_API_URL}?cve=${encodeURIComponent(chunk.join(','))}`;
+        const response = await fetch(url, { headers: { accept: 'application/json' } });
+        if (!response.ok) {
+          throw new Error(`EPSS returned ${response.status}`);
+        }
+        const data = await response.json();
+        const rows = Array.isArray(data.data) ? data.data : [];
+        const byCve = new Map(rows.map((row) => [row.cve, normalizeEpss(row)]));
+        chunk.forEach((cve) => {
+          const score = byCve.get(cve) || null;
+          this.epssCache.set(cve, score);
+          result.set(cve, score);
+        });
+      } catch (error) {
+        chunk.forEach((cve) => {
+          this.epssCache.set(cve, null);
+          result.set(cve, null);
+        });
+      }
+    }
+
+    return result;
+  }
+
+  async getKevCatalog() {
+    if (this.kevCatalogCache) {
+      return this.kevCatalogCache;
+    }
+
+    const catalog = new Map();
+    try {
+      const response = await fetch(CISA_KEV_URL, { headers: { accept: 'application/json' } });
+      if (!response.ok) {
+        throw new Error(`CISA KEV returned ${response.status}`);
+      }
+      const data = await response.json();
+      (Array.isArray(data.vulnerabilities) ? data.vulnerabilities : []).forEach((entry) => {
+        if (entry.cveID) {
+          catalog.set(entry.cveID, normalizeKevEntry(entry));
+        }
+      });
+    } catch (error) {
+      // Keep the catalog empty when the feed cannot be reached.
+    }
+
+    this.kevCatalogCache = catalog;
+    return catalog;
+  }
+
   async getDetail(name, dependencyHint) {
     const registry = await this.getRegistryPackage(name);
     const dependency = dependencyHint || this.findKnownDependency(name);
@@ -360,6 +575,8 @@ class NpmWorkspaceModel {
     let auditStatus = dependency && dependency.auditStatus ? dependency.auditStatus : '';
     let auditError = dependency && dependency.auditError ? dependency.auditError : '';
     let transitiveVulnerabilities = dependency && dependency.transitiveVulnerabilities ? dependency.transitiveVulnerabilities : [];
+    let osvVulnerabilities = dependency && dependency.osvVulnerabilities ? dependency.osvVulnerabilities : [];
+    let transitiveOsvVulnerabilities = dependency && dependency.transitiveOsvVulnerabilities ? dependency.transitiveOsvVulnerabilities : [];
 
     if (!auditStatus && resolvedVersion) {
       const auditResult = await this.getAuditAdvisories({ [name]: [resolvedVersion] });
@@ -377,9 +594,35 @@ class NpmWorkspaceModel {
       auditStatus = resolvedVersion ? 'ok' : 'unknown';
     }
 
+    if (!osvVulnerabilities.length && resolvedVersion) {
+      const osvResult = await this.getOsvVulnerabilities([{ name, version: resolvedVersion }]);
+      osvVulnerabilities = osvResult.get(getPackageVersionKey(name, resolvedVersion)) || [];
+    }
+
     if (!transitiveVulnerabilities.length && lockPackage && lockPackage.path && this.lockInfo.exists) {
       const lockAuditResult = await this.getAuditAdvisories(getLockAuditInput(this.lockInfo));
       transitiveVulnerabilities = getTransitiveVulnerabilities(this.lockInfo, { lockPath: lockPackage.path }, lockAuditResult);
+    }
+
+    if (!transitiveOsvVulnerabilities.length && lockPackage && lockPackage.path && this.lockInfo.exists) {
+      const lockOsvResult = await this.getOsvVulnerabilitiesForLock(this.lockInfo);
+      transitiveOsvVulnerabilities = getTransitiveOsvVulnerabilities(this.lockInfo, { lockPath: lockPackage.path }, lockOsvResult);
+    }
+
+    const threatIntel = await this.getThreatIntelForCves(collectCvesFromAdvisories([
+      ...vulnerabilities,
+      ...osvVulnerabilities,
+      ...transitiveVulnerabilities,
+      ...transitiveOsvVulnerabilities
+    ]));
+    const securitySignals = buildSecuritySignals([
+      ...vulnerabilities,
+      ...osvVulnerabilities,
+      ...transitiveVulnerabilities,
+      ...transitiveOsvVulnerabilities
+    ], threatIntel);
+    if (auditStatus === 'ok' && osvVulnerabilities.length) {
+      auditStatus = 'vulnerable';
     }
 
     return {
@@ -429,12 +672,15 @@ class NpmWorkspaceModel {
       deprecated: Boolean(versionInfo.manifest && versionInfo.manifest.deprecated),
       deprecatedMessage: versionInfo.manifest && versionInfo.manifest.deprecated ? versionInfo.manifest.deprecated : '',
       vulnerabilities,
+      osvVulnerabilities,
       transitiveVulnerabilities,
-      transitiveVulnerabilityCount: transitiveVulnerabilities.length,
-      transitiveMaxSeverity: getMaxSeverity(transitiveVulnerabilities),
+      transitiveOsvVulnerabilities,
+      transitiveVulnerabilityCount: transitiveVulnerabilities.length + transitiveOsvVulnerabilities.length,
+      transitiveMaxSeverity: getMaxSeverity([...transitiveVulnerabilities, ...transitiveOsvVulnerabilities]),
       auditStatus,
       auditError,
-      maxSeverity: dependency && dependency.maxSeverity ? dependency.maxSeverity : getMaxSeverity(vulnerabilities),
+      maxSeverity: dependency && dependency.maxSeverity ? dependency.maxSeverity : getMaxSeverity([...vulnerabilities, ...osvVulnerabilities]),
+      securitySignals,
       weeklyDownloads,
       cacheStats: this.getCacheStats(),
       readme,
@@ -650,6 +896,9 @@ class NpmWorkspaceModel {
       registry: this.registryCache.size,
       dependencies: this.dependencyCache.size,
       audit: this.auditCache.size,
+      osv: this.osvCache.size,
+      epss: this.epssCache.size,
+      kev: this.kevCatalogCache ? this.kevCatalogCache.size : 0,
       readme: this.readmeFallbackCache.size,
       downloads: this.downloadCache.size
     };
@@ -1053,6 +1302,23 @@ function getTransitiveVulnerabilities(lockInfo, dependency, auditResult) {
   return vulnerabilities;
 }
 
+function getTransitiveOsvVulnerabilities(lockInfo, dependency, osvResult) {
+  if (!dependency.lockPath || !lockInfo || !lockInfo.paths || !osvResult) {
+    return [];
+  }
+
+  const root = lockInfo.paths.get(dependency.lockPath);
+  if (!root) {
+    return [];
+  }
+
+  const vulnerabilities = [];
+  const seenPaths = new Set();
+  const seenAdvisories = new Set();
+  collectTransitiveOsvVulnerabilities(root, lockInfo, osvResult, vulnerabilities, seenPaths, seenAdvisories);
+  return vulnerabilities;
+}
+
 function collectTransitiveVulnerabilities(packageInfo, lockInfo, auditResult, vulnerabilities, seenPaths, seenAdvisories) {
   if (!packageInfo || seenPaths.has(packageInfo.path)) {
     return;
@@ -1092,6 +1358,42 @@ function collectTransitiveVulnerabilities(packageInfo, lockInfo, auditResult, vu
   });
 }
 
+function collectTransitiveOsvVulnerabilities(packageInfo, lockInfo, osvResult, vulnerabilities, seenPaths, seenAdvisories) {
+  if (!packageInfo || seenPaths.has(packageInfo.path)) {
+    return;
+  }
+  seenPaths.add(packageInfo.path);
+
+  const dependencies = {
+    ...(packageInfo.dependencies || {}),
+    ...(packageInfo.optionalDependencies || {})
+  };
+
+  Object.keys(dependencies).forEach((dependencyName) => {
+    const child = findLockChild(lockInfo, packageInfo.path, dependencyName);
+    if (!child) {
+      return;
+    }
+
+    const advisories = osvResult.get(getPackageVersionKey(child.name, child.version)) || [];
+    advisories.forEach((advisory) => {
+      const key = `${child.path}:${advisory.id || advisory.title}`;
+      if (seenAdvisories.has(key)) {
+        return;
+      }
+      seenAdvisories.add(key);
+      vulnerabilities.push({
+        ...advisory,
+        packageName: child.name,
+        packageVersion: child.version,
+        packagePath: child.path
+      });
+    });
+
+    collectTransitiveOsvVulnerabilities(child, lockInfo, osvResult, vulnerabilities, seenPaths, seenAdvisories);
+  });
+}
+
 function findLockChild(lockInfo, parentPath, dependencyName) {
   const nestedPath = `${parentPath}/node_modules/${dependencyName}`;
   if (lockInfo.paths.has(nestedPath)) {
@@ -1104,6 +1406,10 @@ function findLockChild(lockInfo, parentPath, dependencyName) {
   }
 
   return lockInfo.packages.get(dependencyName);
+}
+
+function getPackageVersionKey(name, version) {
+  return `${name}@${version}`;
 }
 
 function collectDependencyEntries(packageJson, filter) {
@@ -1149,7 +1455,7 @@ function filterDependencyRisk(entries, filter) {
 
   return entries.filter((entry) => {
     if (filter === 'vulnerable') {
-      return entry.auditStatus === 'vulnerable' || entry.transitiveVulnerabilityCount > 0;
+      return entry.auditStatus === 'vulnerable' || entry.transitiveVulnerabilityCount > 0 || (entry.osvVulnerabilities || []).length || (entry.transitiveOsvVulnerabilities || []).length || (entry.securitySignals && entry.securitySignals.kev && entry.securitySignals.kev.length);
     }
     if (filter === 'deprecated') {
       return entry.deprecated;
@@ -1158,7 +1464,7 @@ function filterDependencyRisk(entries, filter) {
       return entry.auditStatus === 'unknown';
     }
     if (filter === 'ok') {
-      return !entry.deprecated && entry.auditStatus !== 'vulnerable' && entry.auditStatus !== 'unknown' && !entry.transitiveVulnerabilityCount;
+      return !entry.deprecated && entry.auditStatus !== 'vulnerable' && entry.auditStatus !== 'unknown' && !entry.transitiveVulnerabilityCount && !(entry.osvVulnerabilities || []).length && !(entry.transitiveOsvVulnerabilities || []).length && !(entry.securitySignals && entry.securitySignals.kev && entry.securitySignals.kev.length);
     }
     return true;
   });
@@ -1287,12 +1593,188 @@ function getPublishedAt(timeMap, version) {
 
 function normalizeAdvisory(advisory) {
   return {
+    id: advisory.id || advisory.source || '',
+    source: 'npm audit',
     title: advisory.title || advisory.name || 'Security advisory',
     severity: advisory.severity || 'unknown',
     url: advisory.url || advisory.source || '',
     vulnerableVersions: advisory.vulnerable_versions || advisory.vulnerableVersions || advisory.range || '',
-    patchedVersions: advisory.patched_versions || advisory.patchedVersions || ''
+    patchedVersions: advisory.patched_versions || advisory.patchedVersions || '',
+    cves: normalizeCves(advisory.cves || advisory.cve || advisory.cwe || [])
   };
+}
+
+function normalizeOsvVulnerability(vulnerability, packageInfo) {
+  if (!vulnerability || !vulnerability.id) {
+    return null;
+  }
+
+  const cves = normalizeCves([...(vulnerability.aliases || []), vulnerability.id]);
+  const affected = Array.isArray(vulnerability.affected) ? vulnerability.affected : [];
+  const packageAffected = affected.find((entry) => {
+    return entry && entry.package && entry.package.ecosystem === 'npm' && entry.package.name === packageInfo.name;
+  }) || affected[0] || {};
+
+  return {
+    id: vulnerability.id,
+    source: 'OSV',
+    title: vulnerability.summary || vulnerability.id,
+    severity: normalizeOsvSeverity(vulnerability),
+    url: `https://osv.dev/vulnerability/${encodeURIComponent(vulnerability.id)}`,
+    vulnerableVersions: getOsvAffectedRanges(packageAffected),
+    patchedVersions: getOsvFixedVersions(packageAffected),
+    aliases: vulnerability.aliases || [],
+    cves,
+    modified: vulnerability.modified || '',
+    published: vulnerability.published || ''
+  };
+}
+
+function normalizeOsvSeverity(vulnerability) {
+  if (vulnerability.database_specific && vulnerability.database_specific.severity) {
+    return String(vulnerability.database_specific.severity).toLowerCase();
+  }
+
+  const severity = Array.isArray(vulnerability.severity) ? vulnerability.severity[0] : undefined;
+  if (severity && severity.score) {
+    const score = Number.parseFloat(String(severity.score).split('/').at(-1));
+    if (Number.isFinite(score)) {
+      if (score >= 9) {
+        return 'critical';
+      }
+      if (score >= 7) {
+        return 'high';
+      }
+      if (score >= 4) {
+        return 'moderate';
+      }
+      return 'low';
+    }
+  }
+
+  return 'unknown';
+}
+
+function getOsvAffectedRanges(affected) {
+  const ranges = Array.isArray(affected.ranges) ? affected.ranges : [];
+  return ranges.map((range) => {
+    const events = Array.isArray(range.events) ? range.events : [];
+    return events.map((event) => {
+      if (event.introduced) {
+        return `>=${event.introduced}`;
+      }
+      if (event.fixed) {
+        return `<${event.fixed}`;
+      }
+      if (event.last_affected) {
+        return `<=${event.last_affected}`;
+      }
+      return '';
+    }).filter(Boolean).join(' ');
+  }).filter(Boolean).join(', ');
+}
+
+function getOsvFixedVersions(affected) {
+  const ranges = Array.isArray(affected.ranges) ? affected.ranges : [];
+  const fixed = [];
+  ranges.forEach((range) => {
+    (Array.isArray(range.events) ? range.events : []).forEach((event) => {
+      if (event.fixed) {
+        fixed.push(event.fixed);
+      }
+    });
+  });
+  return [...new Set(fixed)].join(', ');
+}
+
+function normalizeCves(values) {
+  return [...new Set([values].flat(Infinity)
+    .map((value) => String(value || '').toUpperCase().trim())
+    .filter(isCveId))];
+}
+
+function isCveId(value) {
+  return /^CVE-\d{4}-\d{4,}$/i.test(String(value || ''));
+}
+
+function normalizeEpss(row) {
+  const score = Number.parseFloat(row.epss);
+  const percentile = Number.parseFloat(row.percentile);
+  return {
+    cve: row.cve,
+    epss: Number.isFinite(score) ? score : null,
+    percentile: Number.isFinite(percentile) ? percentile : null,
+    date: row.date || ''
+  };
+}
+
+function normalizeKevEntry(entry) {
+  return {
+    cve: entry.cveID,
+    vendorProject: entry.vendorProject || '',
+    product: entry.product || '',
+    vulnerabilityName: entry.vulnerabilityName || '',
+    dateAdded: entry.dateAdded || '',
+    dueDate: entry.dueDate || '',
+    knownRansomwareCampaignUse: entry.knownRansomwareCampaignUse || '',
+    requiredAction: entry.requiredAction || '',
+    notes: entry.notes || ''
+  };
+}
+
+function collectCvesFromSecurityResults(...results) {
+  const cves = [];
+  results.forEach((result) => {
+    if (!result) {
+      return;
+    }
+    result.forEach((advisories) => {
+      cves.push(...collectCvesFromAdvisories(advisories));
+    });
+  });
+  return [...new Set(cves)];
+}
+
+function collectCvesFromAdvisories(advisories) {
+  const cves = [];
+  (advisories || []).forEach((advisory) => {
+    cves.push(...normalizeCves(advisory.cves || advisory.aliases || advisory.id || []));
+  });
+  return [...new Set(cves)];
+}
+
+function buildSecuritySignals(advisories, threatIntel) {
+  const cves = collectCvesFromAdvisories(advisories);
+  const kev = [];
+  const epss = [];
+
+  cves.forEach((cve) => {
+    const kevEntry = threatIntel && threatIntel.kev ? threatIntel.kev.get(cve) : null;
+    const epssEntry = threatIntel && threatIntel.epss ? threatIntel.epss.get(cve) : null;
+    if (kevEntry) {
+      kev.push(kevEntry);
+    }
+    if (epssEntry) {
+      epss.push(epssEntry);
+    }
+  });
+
+  epss.sort((a, b) => (b.epss || 0) - (a.epss || 0));
+
+  return {
+    cves,
+    kev,
+    epss,
+    maxEpss: epss[0] || null
+  };
+}
+
+function chunkArray(items, size) {
+  const chunks = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function renderReadmeHtml(readme) {

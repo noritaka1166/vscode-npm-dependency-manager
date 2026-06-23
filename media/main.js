@@ -251,7 +251,7 @@
 
     return dependencies.filter((dependency) => {
       if (riskFilter === 'vulnerable') {
-        return dependency.auditStatus === 'vulnerable' || dependency.transitiveVulnerabilityCount > 0;
+        return dependency.auditStatus === 'vulnerable' || dependency.transitiveVulnerabilityCount > 0 || hasOsv(dependency) || hasKev(dependency);
       }
       if (riskFilter === 'deprecated') {
         return dependency.deprecated;
@@ -260,7 +260,7 @@
         return dependency.auditStatus === 'unknown';
       }
       if (riskFilter === 'ok') {
-        return !dependency.deprecated && dependency.auditStatus !== 'vulnerable' && dependency.auditStatus !== 'unknown' && !dependency.transitiveVulnerabilityCount;
+        return !dependency.deprecated && dependency.auditStatus !== 'vulnerable' && dependency.auditStatus !== 'unknown' && !dependency.transitiveVulnerabilityCount && !hasOsv(dependency) && !hasKev(dependency);
       }
       return true;
     });
@@ -511,16 +511,16 @@
 
   function renderCacheSummary(cacheStats) {
     const stats = cacheStats || {};
-    const total = ['registry', 'dependencies', 'audit', 'readme', 'downloads'].reduce((sum, key) => {
+    const total = ['registry', 'dependencies', 'audit', 'osv', 'epss', 'readme', 'downloads'].reduce((sum, key) => {
       return sum + (Number.isFinite(stats[key]) ? stats[key] : 0);
     }, 0);
 
-    return `<div class="cacheSummary"><span>cache</span><strong>${formatNumber(total)} entries</strong><small>registry ${formatNumber(stats.registry || 0)} / audit ${formatNumber(stats.audit || 0)} / downloads ${formatNumber(stats.downloads || 0)}</small></div>`;
+    return `<div class="cacheSummary"><span>cache</span><strong>${formatNumber(total)} entries</strong><small>registry ${formatNumber(stats.registry || 0)} / audit ${formatNumber(stats.audit || 0)} / OSV ${formatNumber(stats.osv || 0)} / EPSS ${formatNumber(stats.epss || 0)}</small></div>`;
   }
 
   function renderCompactStatus(lockInfo, cacheStats) {
     const stats = cacheStats || {};
-    const cacheTotal = ['registry', 'dependencies', 'audit', 'readme', 'downloads'].reduce((sum, key) => {
+    const cacheTotal = ['registry', 'dependencies', 'audit', 'osv', 'epss', 'readme', 'downloads'].reduce((sum, key) => {
       return sum + (Number.isFinite(stats[key]) ? stats[key] : 0);
     }, 0);
     const lockLabel = lockInfo && lockInfo.exists ? `lock v${lockInfo.lockfileVersion || '?'}` : 'no lock';
@@ -567,6 +567,15 @@
     if (dependency.auditStatus === 'vulnerable') {
       badges.push(`<span class="badge vulnerable">${escapeHtml(dependency.maxSeverity || 'vuln')}</span>`);
     }
+    if (hasOsv(dependency)) {
+      badges.push(`<span class="badge osv">OSV ${formatNumber((dependency.osvVulnerabilities || []).length + (dependency.transitiveOsvVulnerabilities || []).length)}</span>`);
+    }
+    if (hasKev(dependency)) {
+      badges.push(`<span class="badge kev">KEV</span>`);
+    }
+    if (dependency.securitySignals && dependency.securitySignals.maxEpss && Number.isFinite(dependency.securitySignals.maxEpss.epss)) {
+      badges.push(`<span class="badge epss">EPSS ${formatPercent(dependency.securitySignals.maxEpss.epss)}</span>`);
+    }
     if (dependency.transitiveVulnerabilityCount) {
       badges.push(`<span class="badge transitive">${escapeHtml(dependency.transitiveMaxSeverity || 'transitive')} ${formatNumber(dependency.transitiveVulnerabilityCount)}</span>`);
     }
@@ -574,6 +583,14 @@
       badges.push('<span class="badge unknown">not checked</span>');
     }
     return badges.length ? badges.join('') : '<span class="badge ok">ok</span>';
+  }
+
+  function hasOsv(dependency) {
+    return Boolean((dependency.osvVulnerabilities || []).length || (dependency.transitiveOsvVulnerabilities || []).length);
+  }
+
+  function hasKev(dependency) {
+    return Boolean(dependency.securitySignals && dependency.securitySignals.kev && dependency.securitySignals.kev.length);
   }
 
   function renderLockBadge(dependency) {
@@ -707,6 +724,13 @@
     return value.toLocaleString();
   }
 
+  function formatPercent(value) {
+    if (!Number.isFinite(value)) {
+      return '-';
+    }
+    return `${Math.round(value * 100)}%`;
+  }
+
   function shortenUrl(value) {
     try {
       const url = new URL(value);
@@ -718,18 +742,23 @@
 
   function renderSecurity(detail) {
     const vulnerabilities = detail.vulnerabilities || [];
+    const osvVulnerabilities = detail.osvVulnerabilities || [];
     const transitiveVulnerabilities = detail.transitiveVulnerabilities || [];
-    if (!detail.deprecated && !vulnerabilities.length && !transitiveVulnerabilities.length && detail.auditStatus !== 'unknown') {
-      return '<section class="sideSection security okPanel"><h2>Security</h2><p>No deprecation or known vulnerabilities found for the resolved version.</p></section>';
+    const transitiveOsvVulnerabilities = detail.transitiveOsvVulnerabilities || [];
+    const securitySignals = detail.securitySignals || {};
+    if (!detail.deprecated && !vulnerabilities.length && !osvVulnerabilities.length && !transitiveVulnerabilities.length && !transitiveOsvVulnerabilities.length && detail.auditStatus !== 'unknown') {
+      return '<section class="sideSection security okPanel"><h2>Security</h2><p>No deprecation or known vulnerability signals found for the resolved version.</p></section>';
     }
 
     return `
       <section class="sideSection security">
         <h2>Security</h2>
+        ${renderSecuritySignals(securitySignals)}
         ${detail.deprecated ? `<div class="notice deprecatedNotice"><strong>Deprecated</strong><p>${escapeHtml(detail.deprecatedMessage || 'This package version is deprecated.')}</p></div>` : ''}
         ${detail.auditStatus === 'unknown' ? `<div class="notice unknownNotice"><strong>Vulnerabilities not checked</strong><p>${escapeHtml(detail.auditError || 'A resolved version was not available. Add or update package-lock.json for more accurate audit results.')}</p></div>` : ''}
         ${vulnerabilities.length ? `
           <div class="advisories">
+            <h3>npm audit advisories</h3>
             ${vulnerabilities.map((advisory) => `
               <article class="advisory ${escapeAttr(advisory.severity || 'unknown')}">
                 <div>
@@ -743,6 +772,7 @@
             `).join('')}
           </div>
         ` : ''}
+        ${osvVulnerabilities.length ? renderAdvisoryGroup('OSV vulnerabilities', osvVulnerabilities) : ''}
         ${transitiveVulnerabilities.length ? `
           <div class="advisories">
             <h3>Transitive vulnerabilities</h3>
@@ -761,7 +791,50 @@
             `).join('')}
           </div>
         ` : ''}
+        ${transitiveOsvVulnerabilities.length ? renderAdvisoryGroup('Transitive OSV vulnerabilities', transitiveOsvVulnerabilities, true) : ''}
       </section>
+    `;
+  }
+
+  function renderSecuritySignals(signals) {
+    const cves = signals.cves || [];
+    const kev = signals.kev || [];
+    const epss = signals.epss || [];
+    if (!cves.length && !kev.length && !epss.length) {
+      return '';
+    }
+
+    return `
+      <div class="signalPanel">
+        <strong>Risk intelligence</strong>
+        ${cves.length ? `<p>CVEs: ${cves.slice(0, 6).map((cve) => `<span class="metadataChip">${escapeHtml(cve)}</span>`).join('')}${cves.length > 6 ? `<small>+${cves.length - 6} more</small>` : ''}</p>` : ''}
+        ${kev.length ? `<p><span class="badge kev">KEV</span> ${formatNumber(kev.length)} CVE${kev.length === 1 ? '' : 's'} listed in CISA Known Exploited Vulnerabilities.</p>` : ''}
+        ${epss.length ? `<p>Highest EPSS: <strong>${formatPercent(epss[0].epss)}</strong>${Number.isFinite(epss[0].percentile) ? ` (${Math.round(epss[0].percentile * 100)}th percentile)` : ''}</p>` : ''}
+        ${kev.length ? kev.slice(0, 3).map((entry) => `<p class="signalDetail">${escapeHtml(entry.cve)}: ${escapeHtml(entry.vulnerabilityName || `${entry.vendorProject} ${entry.product}`)}${entry.dateAdded ? ` · added ${escapeHtml(entry.dateAdded)}` : ''}</p>`).join('') : ''}
+      </div>
+    `;
+  }
+
+  function renderAdvisoryGroup(title, advisories, transitive = false) {
+    return `
+      <div class="advisories">
+        <h3>${escapeHtml(title)}</h3>
+        ${advisories.map((advisory) => `
+          <article class="advisory ${transitive ? 'transitiveAdvisory' : ''} ${escapeAttr(advisory.severity || 'unknown')}">
+            <div>
+              <strong>${escapeHtml(advisory.packageName ? `${advisory.packageName}@${advisory.packageVersion || '-'}` : advisory.title)}</strong>
+              <span>${escapeHtml(advisory.severity || 'unknown')}</span>
+            </div>
+            ${advisory.packageName ? `<p>${escapeHtml(advisory.title)}</p>` : ''}
+            ${advisory.id ? `<p>ID: ${escapeHtml(advisory.id)}</p>` : ''}
+            ${advisory.cves && advisory.cves.length ? `<p>CVEs: ${advisory.cves.map((cve) => `<span class="metadataChip">${escapeHtml(cve)}</span>`).join('')}</p>` : ''}
+            ${advisory.vulnerableVersions ? `<p>Vulnerable: ${escapeHtml(advisory.vulnerableVersions)}</p>` : ''}
+            ${advisory.patchedVersions ? `<p>Patched: ${escapeHtml(advisory.patchedVersions)}</p>` : ''}
+            ${advisory.packagePath ? `<p>Path: ${escapeHtml(advisory.packagePath)}</p>` : ''}
+            ${advisory.url ? `<a href="${escapeAttr(advisory.url)}">Advisory</a>` : ''}
+          </article>
+        `).join('')}
+      </div>
     `;
   }
 

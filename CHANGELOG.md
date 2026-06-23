@@ -1,5 +1,12 @@
 # Change Log
 
+## 0.0.3
+
+- Added OSV vulnerability checks for direct and transitive dependencies.
+- Added CVE-linked EPSS and CISA Known Exploited Vulnerabilities signals when available.
+- Added OSV, EPSS, and KEV badges to the dependency list and package detail security section.
+- Added OSV, EPSS, and KEV cache visibility to the dashboard cache summary.
+
 ## 0.0.2
 
 - Added update actions for outdated dependencies from the package list and package detail page.

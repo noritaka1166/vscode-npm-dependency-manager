@@ -19,6 +19,7 @@ npm-dependency-manager helps you inspect npm dependencies without leaving VS Cod
 - Runs guarded update actions from the list or package detail page with a confirmation prompt.
 - Reads `package-lock.json` for resolved versions, lock paths, and dependency tree context.
 - Checks npm audit bulk advisories for direct and transitive vulnerabilities when a resolved version is available.
+- Adds OSV vulnerability results plus CVE-linked EPSS and CISA KEV signals when available.
 - Shows deprecated package messages from npm registry metadata.
 - Opens a polished package detail page with npm metadata, weekly downloads, links, security information, lockfile context, dependencies, and rendered README content.
 - Falls back to GitHub README files when the npm registry does not publish useful README content.
@@ -31,6 +32,9 @@ The extension reads package metadata from the public npm registry and related np
 
 - `https://registry.npmjs.org`
 - `https://api.npmjs.org`
+- `https://api.osv.dev`
+- `https://api.first.org`
+- `https://www.cisa.gov`
 
 Some README fallbacks are loaded from repository URLs such as `https://raw.githubusercontent.com` when the npm registry only exposes a README filename or placeholder text.
 
@@ -53,6 +57,7 @@ Vulnerability and dependency tree results are most accurate when a `package-lock
 
 ## Known Limitations
 
-- npm audit checks require a resolved package version. Add or update `package-lock.json` for packages that show `Vulnerabilities not checked`.
+- npm audit and OSV checks require a resolved package version. Add or update `package-lock.json` for packages that show `Vulnerabilities not checked`.
 - Transitive vulnerability attribution depends on the dependency graph recorded in `package-lock.json`.
+- EPSS and KEV signals are shown only for advisories that expose CVE identifiers.
 - README rendering supports common npm/GitHub Markdown, but unusual HTML or repository asset layouts may not render exactly like npmjs.com.

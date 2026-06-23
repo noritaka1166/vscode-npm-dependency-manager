@@ -483,6 +483,17 @@ input {
   background: color-mix(in srgb, var(--vscode-testing-iconFailed) 16%, transparent);
 }
 
+.badge.osv,
+.badge.epss {
+  color: var(--vscode-textLink-foreground);
+  background: color-mix(in srgb, var(--vscode-textLink-foreground) 14%, transparent);
+}
+
+.badge.kev {
+  color: var(--vscode-editorError-foreground, var(--vscode-testing-iconFailed));
+  background: color-mix(in srgb, var(--vscode-editorError-foreground, var(--vscode-testing-iconFailed)) 18%, transparent);
+}
+
 .updateBadge {
   display: inline-flex;
   max-width: 100%;
@@ -799,6 +810,25 @@ small {
 .deprecatedNotice,
 .unknownNotice {
   border-left: 3px solid var(--vscode-testing-iconQueued);
+}
+
+.signalPanel {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--vscode-widget-border, transparent);
+  border-left: 3px solid var(--vscode-textLink-foreground);
+  border-radius: 6px;
+  background: var(--vscode-editorWidget-background);
+}
+
+.signalPanel p {
+  margin: 0;
+}
+
+.signalDetail {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
 }
 
 .advisories {
