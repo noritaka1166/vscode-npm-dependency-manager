@@ -134,7 +134,7 @@
           </div>
         </div>
         <div id="dependencyTable">
-          ${state.message ? `<p class="empty">${escapeHtml(state.message)}</p>` : renderDependencyTable(visibleDependencies)}
+          ${state.isLoading ? renderInlineLoading(state.message) : (state.message ? `<p class="empty">${escapeHtml(state.message)}</p>` : renderDependencyTable(visibleDependencies))}
         </div>
       </section>
     `;
@@ -464,6 +464,15 @@
 
   function renderLoading(message) {
     app.innerHTML = `<div class="center"><div class="spinner"></div><p>${escapeHtml(message || 'Loading...')}</p></div>`;
+  }
+
+  function renderInlineLoading(message) {
+    return `
+      <div class="inlineLoading" role="status" aria-live="polite">
+        <div class="spinner"></div>
+        <p>${escapeHtml(message || 'Loading...')}</p>
+      </div>
+    `;
   }
 
   function renderError(message) {

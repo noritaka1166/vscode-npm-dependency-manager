@@ -73,6 +73,7 @@ class NpmWorkspaceModel {
       dependencies: 0,
       devDependencies: 0
     };
+    this.isLoading = false;
     this.message = '';
     this.lockInfo = createMissingLockInfo('');
     this.registryCache = new Map();
@@ -85,6 +86,7 @@ class NpmWorkspaceModel {
   }
 
   async refresh() {
+    this.isLoading = true;
     this.message = 'Finding package.json files...';
     this.emit();
 
@@ -94,6 +96,7 @@ class NpmWorkspaceModel {
       this.selectedPackageJson = undefined;
       this.dependencies = [];
       this.allDependencies = [];
+      this.isLoading = false;
       this.message = 'No package.json files found in this workspace.';
       this.emit();
       return;
@@ -192,6 +195,7 @@ class NpmWorkspaceModel {
       return;
     }
 
+    this.isLoading = true;
     this.message = 'Loading dependencies...';
     this.emit();
 
@@ -206,6 +210,7 @@ class NpmWorkspaceModel {
 
     await this.attachAuditInfo(this.allDependencies);
 
+    this.isLoading = false;
     this.message = '';
     this.applyDependencyView(false);
     this.emit();
@@ -485,6 +490,7 @@ class NpmWorkspaceModel {
       licenseOptions: getLicenseOptions(filterDependencyType(this.allDependencies, this.filter)),
       searchQuery: this.searchQuery,
       dependencyCounts: this.dependencyCounts,
+      isLoading: this.isLoading,
       cacheStats: this.getCacheStats(),
       lockInfo: {
         exists: this.lockInfo.exists,

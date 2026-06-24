@@ -565,6 +565,25 @@ small {
   animation: spin .8s linear infinite;
 }
 
+.inlineLoading {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 96px;
+  padding: 18px 4px;
+  color: var(--vscode-descriptionForeground);
+}
+
+.inlineLoading .spinner {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+}
+
+.inlineLoading p {
+  margin: 0;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
