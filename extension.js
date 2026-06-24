@@ -5,6 +5,8 @@ const { SecurityService } = require('./lib/security');
 
 const VIEW_ID = 'workspaceNpmSidebar.dependenciesView';
 const PANEL_TYPE = 'workspaceNpmSidebar.dashboard';
+const VISIBLE_COLUMNS_STATE_KEY = 'workspaceNpmSidebar.visibleColumns';
+const COLUMN_WIDTHS_STATE_KEY = 'workspaceNpmSidebar.columnWidths';
 const REGISTRY_BASE_URL = 'https://registry.npmjs.org';
 const DOWNLOADS_API_BASE_URL = 'https://api.npmjs.org/downloads/point/last-week';
 const markdown = new MarkdownIt({
@@ -15,7 +17,7 @@ const markdown = new MarkdownIt({
 
 function activate(context) {
   const model = new NpmWorkspaceModel();
-  const panel = new DashboardPanel(context.extensionUri, model);
+  const panel = new DashboardPanel(context, model);
   const tree = new DependenciesTreeProvider(model);
   const treeView = vscode.window.createTreeView(VIEW_ID, { treeDataProvider: tree });
 
@@ -631,8 +633,9 @@ class MessageTreeItem extends vscode.TreeItem {
 }
 
 class DashboardPanel {
-  constructor(extensionUri, model) {
-    this.extensionUri = extensionUri;
+  constructor(context, model) {
+    this.context = context;
+    this.extensionUri = context.extensionUri;
     this.model = model;
     this.panel = undefined;
   }
@@ -683,6 +686,12 @@ class DashboardPanel {
             break;
           case 'setLicenseFilter':
             await this.model.setLicenseFilter(message.filter);
+            break;
+          case 'setVisibleColumns':
+            await this.setVisibleColumns(message.columns);
+            break;
+          case 'setColumnWidths':
+            await this.setColumnWidths(message.widths);
             break;
           case 'refreshAll':
             await this.model.refreshFromNetwork();
@@ -754,7 +763,37 @@ class DashboardPanel {
   }
 
   update() {
-    this.post(this.model.getState());
+    this.post({
+      ...this.model.getState(),
+      visibleColumns: this.getVisibleColumns(),
+      columnWidths: this.getColumnWidths()
+    });
+  }
+
+  async setVisibleColumns(columns) {
+    const visibleColumns = Array.isArray(columns) ? columns.filter((column) => typeof column === 'string') : [];
+    await this.context.globalState.update(VISIBLE_COLUMNS_STATE_KEY, visibleColumns);
+  }
+
+  getVisibleColumns() {
+    const columns = this.context.globalState.get(VISIBLE_COLUMNS_STATE_KEY);
+    return Array.isArray(columns) ? columns : undefined;
+  }
+
+  async setColumnWidths(widths) {
+    const normalized = {};
+    Object.entries(widths && typeof widths === 'object' ? widths : {}).forEach(([key, value]) => {
+      const width = Number(value);
+      if (key && Number.isFinite(width)) {
+        normalized[key] = width;
+      }
+    });
+    await this.context.globalState.update(COLUMN_WIDTHS_STATE_KEY, normalized);
+  }
+
+  getColumnWidths() {
+    const widths = this.context.globalState.get(COLUMN_WIDTHS_STATE_KEY);
+    return widths && typeof widths === 'object' && !Array.isArray(widths) ? widths : undefined;
   }
 
   post(message) {

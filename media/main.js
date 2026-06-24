@@ -1,6 +1,22 @@
 (function () {
   const vscode = acquireVsCodeApi();
   const app = document.getElementById('app');
+  const persistedState = vscode.getState() || {};
+  const packageColumn = { key: 'package', label: 'Package', minWidth: 116, defaultWidth: 180, maxWidth: 520 };
+  const tableColumns = [
+    { key: 'type', label: 'Type', minWidth: 42, defaultWidth: 52, maxWidth: 180 },
+    { key: 'license', label: 'License', minWidth: 86, defaultWidth: 110, maxWidth: 360 },
+    { key: 'current', label: 'Current', minWidth: 68, defaultWidth: 92, maxWidth: 260 },
+    { key: 'lock', label: 'Lock', minWidth: 70, defaultWidth: 86, maxWidth: 240 },
+    { key: 'currentPublished', label: 'Current published', minWidth: 104, defaultWidth: 128, maxWidth: 300 },
+    { key: 'latest', label: 'Latest', minWidth: 68, defaultWidth: 96, maxWidth: 260 },
+    { key: 'latestPublished', label: 'Latest published', minWidth: 104, defaultWidth: 128, maxWidth: 300 },
+    { key: 'update', label: 'Update', minWidth: 68, defaultWidth: 88, maxWidth: 220 },
+    { key: 'risk', label: 'Risk', minWidth: 86, defaultWidth: 120, maxWidth: 420 },
+    { key: 'action', label: 'Action', minWidth: 72, defaultWidth: 88, maxWidth: 220 }
+  ];
+  const allTableColumns = [packageColumn, ...tableColumns];
+  const defaultVisibleColumns = tableColumns.map((column) => column.key);
   let state = {
     packageFiles: [],
     selectedPackageJson: '',
@@ -28,7 +44,9 @@
       readme: 0,
       downloads: 0
     },
-    dependencies: []
+    dependencies: [],
+    visibleColumns: normalizeVisibleColumns(persistedState.visibleColumns),
+    columnWidths: normalizeColumnWidths(persistedState.columnWidths)
   };
 
   window.addEventListener('message', (event) => {
@@ -43,7 +61,12 @@
     }
 
     if (message.type === 'state') {
-      state = { ...state, ...message };
+      state = {
+        ...state,
+        ...message,
+        visibleColumns: normalizeVisibleColumns(message.visibleColumns || state.visibleColumns),
+        columnWidths: normalizeColumnWidths(message.columnWidths || state.columnWidths)
+      };
       renderList();
     }
 
@@ -132,6 +155,7 @@
             <h2>Packages</h2>
             <p>${formatNumber(visibleDependencies.length)} shown from ${formatNumber(state.dependencies.length)} loaded packages</p>
           </div>
+          ${renderColumnPicker()}
         </div>
         <div id="dependencyTable">
           ${state.isLoading ? renderInlineLoading(state.message) : (state.message ? `<p class="empty">${escapeHtml(state.message)}</p>` : renderDependencyTable(visibleDependencies))}
@@ -200,6 +224,8 @@
     }
 
     bindPackageButtons();
+    bindColumnPicker();
+    bindColumnResizers();
   }
 
   function updateDependencyTable() {
@@ -210,6 +236,20 @@
 
     dependencyTable.innerHTML = renderDependencyTable(getVisibleDependencies());
     bindPackageButtons();
+    bindColumnResizers();
+  }
+
+  function bindColumnPicker() {
+    document.querySelectorAll('[data-column-toggle]').forEach((checkbox) => {
+      checkbox.addEventListener('change', () => {
+        const selected = [...document.querySelectorAll('[data-column-toggle]:checked')].map((input) => input.dataset.columnToggle);
+        state.visibleColumns = normalizeVisibleColumns(selected);
+        persistViewState();
+        vscode.postMessage({ type: 'setVisibleColumns', columns: state.visibleColumns });
+        updateDependencyTable();
+        updateColumnSummary();
+      });
+    });
   }
 
   function bindPackageButtons() {
@@ -292,42 +332,178 @@
       return '<p class="empty">No packages match this filter or search.</p>';
     }
 
+    const visibleColumns = normalizeVisibleColumns(state.visibleColumns);
+    const visibleColumnDefs = tableColumns.filter((column) => visibleColumns.includes(column.key));
+    const gridTemplate = getDependencyGridTemplate(visibleColumnDefs);
+    const minWidth = getDependencyMinWidth(visibleColumnDefs);
+
     return `
       <div class="tableScroller">
-        <div class="list">
+        <div class="list" style="--dependency-columns: ${escapeAttr(gridTemplate)}; --dependency-min-width: ${minWidth}px">
         <div class="row head">
-          <span>Package</span>
-          <span>Type</span>
-          <span>License</span>
-          <span>Current</span>
-          <span>Lock</span>
-          <span>Current published</span>
-          <span>Latest</span>
-          <span>Latest published</span>
-          <span>Update</span>
-          <span>Risk</span>
-          <span>Action</span>
+          ${renderHeaderCell(packageColumn)}
+          ${visibleColumnDefs.map(renderHeaderCell).join('')}
         </div>
         ${dependencies.map((dependency) => `
           <div class="row ${getUpdateRowClass(dependency)}">
             <button class="name ${dependency.status}" data-package="${escapeAttr(dependency.name)}" title="${escapeAttr(dependency.description || dependency.name)}">
               ${escapeHtml(dependency.name)}
             </button>
-            <span class="pill">${dependency.type === 'dependencies' ? 'dep' : 'dev'}</span>
-            <span class="licenseCell">${renderLicense(dependency.license)}</span>
-            <span class="version">${escapeHtml(dependency.currentVersion)}</span>
-            <span class="lockCell">${renderLockBadge(dependency)}</span>
-            <span class="version">${renderDate(dependency.resolvedPublishedAt)}</span>
-            <span class="version">${escapeHtml(dependency.latestVersion || '-')}</span>
-            <span class="version">${renderDate(dependency.latestPublishedAt)}</span>
-            <span class="update">${renderUpdate(dependency)}</span>
-            <span class="risk">${renderRisk(dependency)}</span>
-            <span class="actionCell">${renderUpdateAction(dependency)}</span>
+            ${visibleColumnDefs.map((column) => renderDependencyCell(column.key, dependency)).join('')}
           </div>
         `).join('')}
         </div>
       </div>
     `;
+  }
+
+  function renderHeaderCell(column) {
+    return `
+      <span class="columnHeader" data-column-header="${escapeAttr(column.key)}">
+        <span>${escapeHtml(column.label)}</span>
+        <span class="columnResizeHandle" data-column-resize="${escapeAttr(column.key)}" title="Resize ${escapeAttr(column.label)}"></span>
+      </span>
+    `;
+  }
+
+  function renderDependencyCell(columnKey, dependency) {
+    const cells = {
+      type: `<span class="pill">${dependency.type === 'dependencies' ? 'dep' : 'dev'}</span>`,
+      license: `<span class="licenseCell">${renderLicense(dependency.license)}</span>`,
+      current: `<span class="version">${escapeHtml(dependency.currentVersion)}</span>`,
+      lock: `<span class="lockCell">${renderLockBadge(dependency)}</span>`,
+      currentPublished: `<span class="version">${renderDate(dependency.resolvedPublishedAt)}</span>`,
+      latest: `<span class="version">${escapeHtml(dependency.latestVersion || '-')}</span>`,
+      latestPublished: `<span class="version">${renderDate(dependency.latestPublishedAt)}</span>`,
+      update: `<span class="update">${renderUpdate(dependency)}</span>`,
+      risk: `<span class="risk">${renderRisk(dependency)}</span>`,
+      action: `<span class="actionCell">${renderUpdateAction(dependency)}</span>`
+    };
+    return cells[columnKey] || '';
+  }
+
+  function renderColumnPicker() {
+    const visibleColumns = normalizeVisibleColumns(state.visibleColumns);
+    return `
+      <details class="columnPicker">
+        <summary>
+          Columns
+          <span id="columnSummary">${formatNumber(visibleColumns.length + 1)}</span>
+        </summary>
+        <div class="columnMenu">
+          <label class="columnOption disabled">
+            <input type="checkbox" checked disabled>
+            <span>Package</span>
+          </label>
+          ${tableColumns.map((column) => `
+            <label class="columnOption">
+              <input type="checkbox" data-column-toggle="${escapeAttr(column.key)}" ${visibleColumns.includes(column.key) ? 'checked' : ''}>
+              <span>${escapeHtml(column.label)}</span>
+            </label>
+          `).join('')}
+        </div>
+      </details>
+    `;
+  }
+
+  function updateColumnSummary() {
+    const summary = document.getElementById('columnSummary');
+    if (summary) {
+      summary.textContent = String(normalizeVisibleColumns(state.visibleColumns).length + 1);
+    }
+  }
+
+  function normalizeVisibleColumns(columns) {
+    const allowed = new Set(tableColumns.map((column) => column.key));
+    return Array.isArray(columns) ? columns.filter((column) => allowed.has(column)) : defaultVisibleColumns;
+  }
+
+  function normalizeColumnWidths(widths) {
+    const normalized = {};
+    const source = widths && typeof widths === 'object' && !Array.isArray(widths) ? widths : {};
+    allTableColumns.forEach((column) => {
+      normalized[column.key] = clampColumnWidth(column.key, source[column.key]);
+    });
+    return normalized;
+  }
+
+  function getColumnDefinition(columnKey) {
+    return allTableColumns.find((column) => column.key === columnKey);
+  }
+
+  function getColumnWidth(columnKey) {
+    return clampColumnWidth(columnKey, state.columnWidths && state.columnWidths[columnKey]);
+  }
+
+  function clampColumnWidth(columnKey, value) {
+    const column = getColumnDefinition(columnKey);
+    if (!column) {
+      return Number(value) || 0;
+    }
+    const width = Number(value);
+    const effectiveWidth = Number.isFinite(width) ? width : column.defaultWidth;
+    return Math.min(Math.max(Math.round(effectiveWidth), column.minWidth), column.maxWidth);
+  }
+
+  function getDependencyGridTemplate(visibleColumnDefs = tableColumns.filter((column) => normalizeVisibleColumns(state.visibleColumns).includes(column.key))) {
+    return [packageColumn, ...visibleColumnDefs].map((column) => `${getColumnWidth(column.key)}px`).join(' ');
+  }
+
+  function getDependencyMinWidth(visibleColumnDefs) {
+    return [packageColumn, ...visibleColumnDefs].reduce((total, column) => total + getColumnWidth(column.key) + 6, 16);
+  }
+
+  function applyColumnWidths() {
+    const list = document.querySelector('.list');
+    if (!list) {
+      return;
+    }
+    const visibleColumnDefs = tableColumns.filter((column) => normalizeVisibleColumns(state.visibleColumns).includes(column.key));
+    list.style.setProperty('--dependency-columns', getDependencyGridTemplate(visibleColumnDefs));
+    list.style.setProperty('--dependency-min-width', `${getDependencyMinWidth(visibleColumnDefs)}px`);
+  }
+
+  function bindColumnResizers() {
+    document.querySelectorAll('[data-column-resize]').forEach((handle) => {
+      handle.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        const columnKey = handle.dataset.columnResize;
+        const startX = event.clientX;
+        const startWidth = getColumnWidth(columnKey);
+        handle.setPointerCapture(event.pointerId);
+        document.body.classList.add('resizingColumns');
+
+        const onPointerMove = (moveEvent) => {
+          state.columnWidths = normalizeColumnWidths({
+            ...state.columnWidths,
+            [columnKey]: startWidth + moveEvent.clientX - startX
+          });
+          applyColumnWidths();
+        };
+
+        const onPointerUp = () => {
+          handle.removeEventListener('pointermove', onPointerMove);
+          handle.removeEventListener('pointerup', onPointerUp);
+          handle.removeEventListener('pointercancel', onPointerUp);
+          document.body.classList.remove('resizingColumns');
+          persistViewState();
+          vscode.postMessage({ type: 'setColumnWidths', widths: state.columnWidths });
+        };
+
+        handle.addEventListener('pointermove', onPointerMove);
+        handle.addEventListener('pointerup', onPointerUp);
+        handle.addEventListener('pointercancel', onPointerUp);
+      });
+    });
+  }
+
+  function persistViewState() {
+    const previous = vscode.getState() || {};
+    vscode.setState({
+      ...previous,
+      visibleColumns: state.visibleColumns,
+      columnWidths: state.columnWidths
+    });
   }
 
   function renderDetail(detail) {

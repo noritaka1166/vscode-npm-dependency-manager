@@ -233,7 +233,7 @@ input {
 .list {
   display: grid;
   gap: 1px;
-  min-width: 980px;
+  min-width: min(100%, var(--dependency-min-width, 980px));
 }
 
 .dependencySection {
@@ -261,6 +261,78 @@ input {
   font-size: 11px;
 }
 
+.columnPicker {
+  position: relative;
+  justify-self: end;
+}
+
+.columnPicker summary {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 28px;
+  padding: 3px 8px;
+  color: var(--vscode-button-secondaryForeground);
+  background: var(--vscode-button-secondaryBackground);
+  border: 1px solid var(--vscode-widget-border, transparent);
+  border-radius: 4px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.columnPicker summary::-webkit-details-marker {
+  display: none;
+}
+
+.columnPicker summary span {
+  min-width: 18px;
+  padding: 1px 5px;
+  color: var(--vscode-badge-foreground);
+  background: var(--vscode-badge-background);
+  border-radius: 999px;
+  font-size: 10px;
+  text-align: center;
+}
+
+.columnMenu {
+  position: absolute;
+  right: 0;
+  z-index: 20;
+  display: grid;
+  gap: 2px;
+  min-width: 190px;
+  margin-top: 4px;
+  padding: 6px;
+  background: var(--vscode-dropdown-background, var(--vscode-editorWidget-background));
+  border: 1px solid var(--vscode-dropdown-border, var(--vscode-widget-border));
+  border-radius: 6px;
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--vscode-editor-background) 36%, transparent);
+}
+
+.columnOption {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  min-height: 26px;
+  padding: 3px 5px;
+  border-radius: 4px;
+}
+
+.columnOption:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+.columnOption.disabled {
+  color: var(--vscode-descriptionForeground);
+}
+
+.columnOption input {
+  width: 14px;
+  min-height: 14px;
+  margin: 0;
+}
+
 .tableScroller {
   overflow-x: auto;
   padding-bottom: 4px;
@@ -270,7 +342,7 @@ input {
 
 .row {
   display: grid;
-  grid-template-columns: minmax(116px, 1.2fr) 42px minmax(86px, .72fr) minmax(68px, .62fr) minmax(70px, .58fr) minmax(104px, .82fr) minmax(68px, .62fr) minmax(104px, .82fr) minmax(68px, .58fr) minmax(86px, .72fr) 72px;
+  grid-template-columns: var(--dependency-columns, minmax(116px, 1.2fr) 42px minmax(86px, .72fr) minmax(68px, .62fr) minmax(70px, .58fr) minmax(104px, .82fr) minmax(68px, .62fr) minmax(104px, .82fr) minmax(68px, .58fr) minmax(86px, .72fr) 72px);
   gap: 6px;
   align-items: center;
   min-height: 36px;
@@ -289,6 +361,52 @@ input {
   background: var(--vscode-editorWidget-background);
   font-size: 11px;
   font-weight: 600;
+}
+
+.columnHeader {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: 100%;
+  padding-right: 8px;
+}
+
+.columnHeader > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.columnResizeHandle {
+  position: absolute;
+  top: -7px;
+  right: -5px;
+  bottom: -7px;
+  width: 10px;
+  cursor: col-resize;
+}
+
+.columnResizeHandle::after {
+  position: absolute;
+  top: 8px;
+  right: 4px;
+  bottom: 8px;
+  width: 1px;
+  background: color-mix(in srgb, var(--vscode-descriptionForeground) 35%, transparent);
+  content: "";
+  opacity: 0;
+}
+
+.columnHeader:hover .columnResizeHandle::after,
+.columnResizeHandle:focus-visible::after,
+.resizingColumns .columnResizeHandle::after {
+  opacity: 1;
+}
+
+.resizingColumns {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .row.updateRow {
