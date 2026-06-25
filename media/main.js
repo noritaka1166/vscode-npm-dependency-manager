@@ -20,12 +20,12 @@
   let state = {
     packageFiles: [],
     selectedPackageJson: '',
-    filter: 'all',
-    riskFilter: 'all',
-    updateFilter: 'all',
-    licenseFilter: 'all',
+    filter: persistedState.filter || 'all',
+    riskFilter: persistedState.riskFilter || 'all',
+    updateFilter: persistedState.updateFilter || 'all',
+    licenseFilter: persistedState.licenseFilter || 'all',
     licenseOptions: [],
-    searchQuery: '',
+    searchQuery: persistedState.searchQuery || '',
     dependencyCounts: {
       dependencies: 0,
       devDependencies: 0
@@ -179,6 +179,8 @@
 
     document.querySelectorAll('[data-filter]').forEach((button) => {
       button.addEventListener('click', () => {
+        state.filter = button.dataset.filter;
+        persistViewState();
         vscode.postMessage({ type: 'setFilter', filter: button.dataset.filter });
       });
     });
@@ -188,6 +190,7 @@
         state.riskFilter = button.dataset.riskFilter;
         updateRiskSegments();
         updateDependencyTable();
+        persistViewState();
         vscode.postMessage({ type: 'setRiskFilter', filter: button.dataset.riskFilter });
       });
     });
@@ -197,6 +200,7 @@
         state.updateFilter = button.dataset.updateFilter;
         updateUpdateSegments();
         updateDependencyTable();
+        persistViewState();
         vscode.postMessage({ type: 'setUpdateFilter', filter: button.dataset.updateFilter });
       });
     });
@@ -206,6 +210,7 @@
       licenseSelect.addEventListener('change', (event) => {
         state.licenseFilter = event.target.value;
         updateDependencyTable();
+        persistViewState();
         vscode.postMessage({ type: 'setLicenseFilter', filter: event.target.value });
       });
     }
@@ -218,6 +223,7 @@
         updateDependencyTable();
         clearTimeout(searchTimer);
         searchTimer = setTimeout(() => {
+          persistViewState();
           vscode.postMessage({ type: 'setSearchQuery', query: event.target.value });
         }, 300);
       });
@@ -502,7 +508,12 @@
     vscode.setState({
       ...previous,
       visibleColumns: state.visibleColumns,
-      columnWidths: state.columnWidths
+      columnWidths: state.columnWidths,
+      filter: state.filter,
+      riskFilter: state.riskFilter,
+      updateFilter: state.updateFilter,
+      licenseFilter: state.licenseFilter,
+      searchQuery: state.searchQuery
     });
   }
 

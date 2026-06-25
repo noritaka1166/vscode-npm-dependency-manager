@@ -5,6 +5,7 @@ const { SecurityService } = require('./lib/security');
 
 const VIEW_ID = 'workspaceNpmSidebar.dependenciesView';
 const PANEL_TYPE = 'workspaceNpmSidebar.dashboard';
+const FILTER_STATE_KEY = 'workspaceNpmSidebar.filters';
 const VISIBLE_COLUMNS_STATE_KEY = 'workspaceNpmSidebar.visibleColumns';
 const COLUMN_WIDTHS_STATE_KEY = 'workspaceNpmSidebar.columnWidths';
 const REGISTRY_BASE_URL = 'https://registry.npmjs.org';
@@ -16,7 +17,7 @@ const markdown = new MarkdownIt({
 });
 
 function activate(context) {
-  const model = new NpmWorkspaceModel();
+  const model = new NpmWorkspaceModel(context);
   const panel = new DashboardPanel(context, model);
   const tree = new DependenciesTreeProvider(model);
   const treeView = vscode.window.createTreeView(VIEW_ID, { treeDataProvider: tree });
@@ -61,14 +62,16 @@ async function openExternalUrl(value) {
 }
 
 class NpmWorkspaceModel {
-  constructor() {
+  constructor(context) {
+    this.context = context;
+    const filters = normalizeFilterState(context && context.workspaceState.get(FILTER_STATE_KEY));
     this.packageFiles = [];
     this.selectedPackageJson = undefined;
-    this.filter = 'all';
-    this.riskFilter = 'all';
-    this.updateFilter = 'all';
-    this.licenseFilter = 'all';
-    this.searchQuery = '';
+    this.filter = filters.filter;
+    this.riskFilter = filters.riskFilter;
+    this.updateFilter = filters.updateFilter;
+    this.licenseFilter = filters.licenseFilter;
+    this.searchQuery = filters.searchQuery;
     this.dependencies = [];
     this.allDependencies = [];
     this.dependencyCounts = {
@@ -167,28 +170,47 @@ class NpmWorkspaceModel {
   }
 
   async setFilter(filter) {
-    this.filter = filter || 'all';
+    this.filter = normalizeDependencyFilter(filter);
+    await this.saveFilterState();
     this.applyDependencyView();
   }
 
   async setSearchQuery(query) {
     this.searchQuery = String(query || '');
+    await this.saveFilterState();
     this.applyDependencyView(true, 'search');
   }
 
   async setRiskFilter(filter) {
-    this.riskFilter = filter || 'all';
+    this.riskFilter = normalizeRiskFilter(filter);
+    await this.saveFilterState();
     this.applyDependencyView(true, 'risk');
   }
 
   async setUpdateFilter(filter) {
-    this.updateFilter = filter || 'all';
+    this.updateFilter = normalizeUpdateFilter(filter);
+    await this.saveFilterState();
     this.applyDependencyView(true, 'update');
   }
 
   async setLicenseFilter(filter) {
-    this.licenseFilter = filter || 'all';
+    this.licenseFilter = normalizeLicenseFilter(filter);
+    await this.saveFilterState();
     this.applyDependencyView(true, 'license');
+  }
+
+  async saveFilterState() {
+    if (!this.context) {
+      return;
+    }
+
+    await this.context.workspaceState.update(FILTER_STATE_KEY, {
+      filter: this.filter,
+      riskFilter: this.riskFilter,
+      updateFilter: this.updateFilter,
+      licenseFilter: this.licenseFilter,
+      searchQuery: this.searchQuery
+    });
   }
 
   async loadDependencies() {
@@ -1043,6 +1065,34 @@ function filterDependencyLicense(entries, filter) {
   }
 
   return entries.filter((entry) => getLicenseFilterValue(entry.license) === filter);
+}
+
+function normalizeFilterState(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    filter: normalizeDependencyFilter(source.filter),
+    riskFilter: normalizeRiskFilter(source.riskFilter),
+    updateFilter: normalizeUpdateFilter(source.updateFilter),
+    licenseFilter: normalizeLicenseFilter(source.licenseFilter),
+    searchQuery: String(source.searchQuery || '')
+  };
+}
+
+function normalizeDependencyFilter(value) {
+  return ['all', 'dependencies', 'devDependencies'].includes(value) ? value : 'all';
+}
+
+function normalizeRiskFilter(value) {
+  return ['all', 'vulnerable', 'deprecated', 'notChecked', 'ok'].includes(value) ? value : 'all';
+}
+
+function normalizeUpdateFilter(value) {
+  return ['all', 'update', 'major', 'minor', 'patch', 'current'].includes(value) ? value : 'all';
+}
+
+function normalizeLicenseFilter(value) {
+  const normalized = String(value || 'all').trim();
+  return normalized || 'all';
 }
 
 function getLicenseOptions(entries) {
