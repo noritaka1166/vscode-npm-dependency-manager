@@ -41,7 +41,7 @@ function activate(context) {
       panel.show();
     }),
     vscode.commands.registerCommand('workspaceNpmSidebar.openPackage', async (dependency) => {
-      if (dependency && dependency.name) {
+      if (dependency?.name) {
         await panel.showPackage(dependency.name, dependency);
       }
     })
@@ -64,7 +64,7 @@ async function openExternalUrl(value) {
 class NpmWorkspaceModel {
   constructor(context) {
     this.context = context;
-    const filters = normalizeFilterState(context && context.workspaceState.get(FILTER_STATE_KEY));
+    const filters = normalizeFilterState(context?.workspaceState.get(FILTER_STATE_KEY));
     this.packageFiles = [];
     this.selectedPackageJson = undefined;
     this.filter = filters.filter;
@@ -253,7 +253,7 @@ class NpmWorkspaceModel {
 
   async enrichDependency(entry, lockPackage) {
     const registry = await this.getRegistryPackage(entry.name);
-    const resolvedVersion = lockPackage && lockPackage.version ? lockPackage.version : '';
+    const resolvedVersion = lockPackage?.version ? lockPackage.version : '';
     const versionInfo = resolveVersionInfo(registry, resolvedVersion || entry.currentVersion);
     const updateInfo = getUpdateInfo(resolvedVersion || versionInfo.version || entry.currentVersion, registry.latestVersion);
 
@@ -263,21 +263,21 @@ class NpmWorkspaceModel {
       latestVersion: registry.latestVersion,
       resolvedPublishedAt: getPublishedAt(registry.time, resolvedVersion || versionInfo.version),
       latestPublishedAt: getPublishedAt(registry.time, registry.latestVersion),
-      lockStatus: lockPackage && lockPackage.version ? 'locked' : 'unlocked',
-      lockPath: lockPackage && lockPackage.path ? lockPackage.path : '',
-      lockResolved: lockPackage && lockPackage.resolved ? lockPackage.resolved : '',
-      lockIntegrity: lockPackage && lockPackage.integrity ? lockPackage.integrity : '',
-      lockDev: Boolean(lockPackage && lockPackage.dev),
-      lockOptional: Boolean(lockPackage && lockPackage.optional),
-      lockPeer: Boolean(lockPackage && lockPackage.peer),
+      lockStatus: lockPackage?.version ? 'locked' : 'unlocked',
+      lockPath: lockPackage?.path ? lockPackage.path : '',
+      lockResolved: lockPackage?.resolved ? lockPackage.resolved : '',
+      lockIntegrity: lockPackage?.integrity ? lockPackage.integrity : '',
+      lockDev: Boolean(lockPackage?.dev),
+      lockOptional: Boolean(lockPackage?.optional),
+      lockPeer: Boolean(lockPackage?.peer),
       description: registry.description,
-      license: normalizeLicenseValue(versionInfo.manifest && versionInfo.manifest.license ? versionInfo.manifest.license : registry.license),
+      license: normalizeLicenseValue(versionInfo.manifest?.license ? versionInfo.manifest.license : registry.license),
       npmUrl: `https://www.npmjs.com/package/${entry.name}`,
       status: getVersionStatus(entry.currentVersion, registry.latestVersion),
       updateType: updateInfo.type,
       updateLabel: updateInfo.label,
-      deprecated: Boolean(versionInfo.manifest && versionInfo.manifest.deprecated),
-      deprecatedMessage: versionInfo.manifest && versionInfo.manifest.deprecated ? versionInfo.manifest.deprecated : ''
+      deprecated: Boolean(versionInfo.manifest?.deprecated),
+      deprecatedMessage: versionInfo.manifest?.deprecated ? versionInfo.manifest.deprecated : ''
     };
   }
 
@@ -287,8 +287,8 @@ class NpmWorkspaceModel {
 
   async getDetail(name, dependencyHint) {
     const dependency = dependencyHint || this.findKnownDependency(name);
-    const lockPackage = dependency && dependency.lockStatus ? dependency : this.lockInfo.packages.get(name);
-    const initialResolvedVersion = dependency && dependency.resolvedVersion ? dependency.resolvedVersion : '';
+    const lockPackage = dependency?.lockStatus ? dependency : this.lockInfo.packages.get(name);
+    const initialResolvedVersion = dependency?.resolvedVersion ? dependency.resolvedVersion : '';
     const registryPromise = this.getRegistryPackage(name);
     const weeklyDownloadsPromise = this.getWeeklyDownloads(name);
     const earlySecurityPromise = initialResolvedVersion
@@ -323,24 +323,24 @@ class NpmWorkspaceModel {
     return {
       name,
       description: registry.description,
-      type: dependency && dependency.type ? dependency.type : '',
-      currentVersion: dependency && dependency.currentVersion ? dependency.currentVersion : '',
+      type: dependency?.type ? dependency.type : '',
+      currentVersion: dependency?.currentVersion ? dependency.currentVersion : '',
       latestVersion: registry.latestVersion,
       resolvedVersion,
       resolvedPublishedAt: getPublishedAt(registry.time, resolvedVersion),
       latestPublishedAt: getPublishedAt(registry.time, registry.latestVersion),
       updateType: updateInfo.type,
       updateLabel: updateInfo.label,
-      dependencyPath: dependency && dependency.dependencyPath ? dependency.dependencyPath : '',
+      dependencyPath: dependency?.dependencyPath ? dependency.dependencyPath : '',
       dependencyDepth: dependency && Number.isFinite(dependency.dependencyDepth) ? dependency.dependencyDepth : 0,
-      parentName: dependency && dependency.parentName ? dependency.parentName : '',
-      parentVersion: dependency && dependency.parentVersion ? dependency.parentVersion : '',
-      parentRange: dependency && dependency.parentRange ? dependency.parentRange : '',
-      resolvedFromVersion: dependency && dependency.resolvedFromVersion ? dependency.resolvedFromVersion : '',
-      lockStatus: lockPackage && lockPackage.lockStatus ? lockPackage.lockStatus : (lockPackage && lockPackage.version ? 'locked' : 'unlocked'),
-      lockPath: lockPackage && lockPackage.lockPath ? lockPackage.lockPath : (lockPackage && lockPackage.path ? lockPackage.path : ''),
-      lockResolved: lockPackage && lockPackage.lockResolved ? lockPackage.lockResolved : (lockPackage && lockPackage.resolved ? lockPackage.resolved : ''),
-      lockIntegrity: lockPackage && lockPackage.lockIntegrity ? lockPackage.lockIntegrity : (lockPackage && lockPackage.integrity ? lockPackage.integrity : ''),
+      parentName: dependency?.parentName ? dependency.parentName : '',
+      parentVersion: dependency?.parentVersion ? dependency.parentVersion : '',
+      parentRange: dependency?.parentRange ? dependency.parentRange : '',
+      resolvedFromVersion: dependency?.resolvedFromVersion ? dependency.resolvedFromVersion : '',
+      lockStatus: lockPackage?.lockStatus ? lockPackage.lockStatus : (lockPackage?.version ? 'locked' : 'unlocked'),
+      lockPath: lockPackage?.lockPath ? lockPackage.lockPath : (lockPackage?.path ? lockPackage.path : ''),
+      lockResolved: lockPackage?.lockResolved ? lockPackage.lockResolved : (lockPackage?.resolved ? lockPackage.resolved : ''),
+      lockIntegrity: lockPackage?.lockIntegrity ? lockPackage.lockIntegrity : (lockPackage?.integrity ? lockPackage.integrity : ''),
       lockDev: Boolean(lockPackage && (lockPackage.lockDev || lockPackage.dev)),
       lockOptional: Boolean(lockPackage && (lockPackage.lockOptional || lockPackage.optional)),
       lockPeer: Boolean(lockPackage && (lockPackage.lockPeer || lockPackage.peer)),
@@ -364,8 +364,8 @@ class NpmWorkspaceModel {
       createdAt: registry.createdAt,
       modifiedAt: registry.modifiedAt,
       versionCount: registry.versionCount,
-      deprecated: Boolean(versionInfo.manifest && versionInfo.manifest.deprecated),
-      deprecatedMessage: versionInfo.manifest && versionInfo.manifest.deprecated ? versionInfo.manifest.deprecated : '',
+      deprecated: Boolean(versionInfo.manifest?.deprecated),
+      deprecatedMessage: versionInfo.manifest?.deprecated ? versionInfo.manifest.deprecated : '',
       ...security,
       weeklyDownloads,
       cacheStats: this.getCacheStats(),
@@ -437,7 +437,7 @@ class NpmWorkspaceModel {
 
     const registry = await this.getRegistryPackage(dependency.name);
     const versionInfo = resolveVersionInfo(registry, dependency.resolvedVersion || dependency.currentVersion);
-    const dependencies = versionInfo.manifest && versionInfo.manifest.dependencies ? versionInfo.manifest.dependencies : {};
+    const dependencies = versionInfo.manifest?.dependencies ? versionInfo.manifest.dependencies : {};
     const entries = Object.entries(dependencies)
       .map(([name, currentVersion]) => ({
         name,
@@ -461,7 +461,7 @@ class NpmWorkspaceModel {
   }
 
   findLockPackageForChild(parentDependency, childName) {
-    const parentLockPath = parentDependency && parentDependency.lockPath ? parentDependency.lockPath : '';
+    const parentLockPath = parentDependency?.lockPath ? parentDependency.lockPath : '';
     if (parentLockPath) {
       const childPath = `${parentLockPath}/node_modules/${childName}`;
       const byPath = this.lockInfo.paths.get(childPath);
@@ -490,7 +490,7 @@ class NpmWorkspaceModel {
     const normalized = {
       name,
       description: data.description || '',
-      latestVersion: data['dist-tags'] && data['dist-tags'].latest ? data['dist-tags'].latest : '',
+      latestVersion: data['dist-tags']?.latest ? data['dist-tags'].latest : '',
       distTags: data['dist-tags'] || {},
       time: data.time || {},
       versions: data.versions || {},
@@ -503,8 +503,8 @@ class NpmWorkspaceModel {
       publisher: normalizePerson(data._npmUser),
       maintainers: Array.isArray(data.maintainers) ? data.maintainers.map(normalizePerson).filter(Boolean) : [],
       keywords: Array.isArray(data.keywords) ? data.keywords.filter(Boolean) : [],
-      createdAt: data.time && data.time.created ? data.time.created : '',
-      modifiedAt: data.time && data.time.modified ? data.time.modified : '',
+      createdAt: data.time?.created ? data.time.created : '',
+      modifiedAt: data.time?.modified ? data.time.modified : '',
       versionCount: data.versions ? Object.keys(data.versions).length : 0
     };
 
@@ -546,8 +546,8 @@ class NpmWorkspaceModel {
   }
 
   createUpdateCommand(message) {
-    const name = String(message && message.name ? message.name : '').trim();
-    const version = String(message && message.version ? message.version : '').trim();
+    const name = String(message?.name ? message.name : '').trim();
+    const version = String(message?.version ? message.version : '').trim();
     if (!name || !version) {
       throw new Error('Package name and latest version are required to build an update command.');
     }
@@ -605,7 +605,7 @@ class DependenciesTreeProvider {
   }
 
   async getChildren(item) {
-    if (item && item.dependency) {
+    if (item?.dependency) {
       if (item.ancestry.includes(item.dependency.name)) {
         return [new MessageTreeItem(`Circular dependency: ${[...item.ancestry, item.dependency.name].join(' > ')}`)];
       }
@@ -906,7 +906,7 @@ async function readPackageLock(packageJsonPath) {
 
     if (lock.packages) {
       Object.entries(lock.packages).forEach(([packagePath, info]) => {
-        if (!packagePath.startsWith('node_modules/') || !info || !info.version) {
+        if (!packagePath.startsWith('node_modules/') || !info?.version) {
           return;
         }
 
@@ -921,7 +921,7 @@ async function readPackageLock(packageJsonPath) {
       collectLockDependencyInfo(lock.dependencies, lockInfo.packages);
     }
   } catch (error) {
-    lockInfo.error = error && error.code === 'FileNotFound' ? '' : getErrorMessage(error);
+    lockInfo.error = error?.code === 'FileNotFound' ? '' : getErrorMessage(error);
     return lockInfo;
   }
 
@@ -967,11 +967,11 @@ function getLockPackageDepth(packagePath) {
 
 function collectLockDependencyInfo(dependencies, packages, parentPath = 'node_modules') {
   Object.entries(dependencies || {}).forEach(([name, info]) => {
-    if (info && info.version) {
+    if (info?.version) {
       const packagePath = `${parentPath}/${name}`;
       setLockPackage(packages, normalizeLockPackage(name, info, packagePath));
     }
-    if (info && info.dependencies) {
+    if (info?.dependencies) {
       collectLockDependencyInfo(info.dependencies, packages, `${parentPath}/${name}/node_modules`);
     }
   });
@@ -1031,7 +1031,7 @@ function filterDependencyRisk(entries, filter) {
 
   return entries.filter((entry) => {
     if (filter === 'vulnerable') {
-      return entry.auditStatus === 'vulnerable' || entry.transitiveVulnerabilityCount > 0 || (entry.osvVulnerabilities || []).length || (entry.transitiveOsvVulnerabilities || []).length || (entry.securitySignals && entry.securitySignals.kev && entry.securitySignals.kev.length);
+      return entry.auditStatus === 'vulnerable' || entry.transitiveVulnerabilityCount > 0 || (entry.osvVulnerabilities || []).length || (entry.transitiveOsvVulnerabilities || []).length || (entry.securitySignals?.kev?.length);
     }
     if (filter === 'deprecated') {
       return entry.deprecated;
@@ -1040,7 +1040,7 @@ function filterDependencyRisk(entries, filter) {
       return entry.auditStatus === 'unknown';
     }
     if (filter === 'ok') {
-      return !entry.deprecated && entry.auditStatus !== 'vulnerable' && entry.auditStatus !== 'unknown' && !entry.transitiveVulnerabilityCount && !(entry.osvVulnerabilities || []).length && !(entry.transitiveOsvVulnerabilities || []).length && !(entry.securitySignals && entry.securitySignals.kev && entry.securitySignals.kev.length);
+      return !entry.deprecated && entry.auditStatus !== 'vulnerable' && entry.auditStatus !== 'unknown' && !entry.transitiveVulnerabilityCount && !(entry.osvVulnerabilities || []).length && !(entry.transitiveOsvVulnerabilities || []).length && !(entry.securitySignals?.kev?.length);
     }
     return true;
   });
@@ -1573,7 +1573,7 @@ async function mapWithConcurrency(items, limit, mapper) {
 }
 
 function getErrorMessage(error) {
-  return error && error.message ? error.message : String(error);
+  return error?.message ? error.message : String(error);
 }
 
 function shellQuote(value) {
