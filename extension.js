@@ -264,23 +264,37 @@ class NpmWorkspaceModel {
   }
 
   async getDetail(name, dependencyHint) {
-    const registry = await this.getRegistryPackage(name);
     const dependency = dependencyHint || this.findKnownDependency(name);
-    const versionInfo = resolveVersionInfo(registry, dependency && (dependency.resolvedVersion || dependency.currentVersion));
-    const useRegistryReadme = isUsefulReadme(registry.readme);
-    const resolvedVersion = dependency && dependency.resolvedVersion ? dependency.resolvedVersion : versionInfo.version;
-    const updateInfo = getUpdateInfo(resolvedVersion, registry.latestVersion);
     const lockPackage = dependency && dependency.lockStatus ? dependency : this.lockInfo.packages.get(name);
-    const [fallbackReadme, weeklyDownloads, security] = await Promise.all([
-      useRegistryReadme ? Promise.resolve('') : this.getFallbackReadme(name, registry),
-      this.getWeeklyDownloads(name),
-      this.security.getPackageSecurity({
+    const initialResolvedVersion = dependency && dependency.resolvedVersion ? dependency.resolvedVersion : '';
+    const registryPromise = this.getRegistryPackage(name);
+    const weeklyDownloadsPromise = this.getWeeklyDownloads(name);
+    const earlySecurityPromise = initialResolvedVersion
+      ? this.security.getPackageSecurity({
         name,
-        resolvedVersion,
+        resolvedVersion: initialResolvedVersion,
         dependency,
         lockPackage,
         lockInfo: this.lockInfo
       })
+      : null;
+
+    const registry = await registryPromise;
+    const versionInfo = resolveVersionInfo(registry, dependency && (dependency.resolvedVersion || dependency.currentVersion));
+    const useRegistryReadme = isUsefulReadme(registry.readme);
+    const resolvedVersion = initialResolvedVersion || versionInfo.version;
+    const updateInfo = getUpdateInfo(resolvedVersion, registry.latestVersion);
+    const securityPromise = earlySecurityPromise || this.security.getPackageSecurity({
+      name,
+      resolvedVersion,
+      dependency,
+      lockPackage,
+      lockInfo: this.lockInfo
+    });
+    const [fallbackReadme, weeklyDownloads, security] = await Promise.all([
+      useRegistryReadme ? Promise.resolve('') : this.getFallbackReadme(name, registry),
+      weeklyDownloadsPromise,
+      securityPromise
     ]);
     const readme = useRegistryReadme ? registry.readme : (fallbackReadme || 'This package does not publish README content to the npm registry.');
 
