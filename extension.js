@@ -268,19 +268,21 @@ class NpmWorkspaceModel {
     const dependency = dependencyHint || this.findKnownDependency(name);
     const versionInfo = resolveVersionInfo(registry, dependency && (dependency.resolvedVersion || dependency.currentVersion));
     const useRegistryReadme = isUsefulReadme(registry.readme);
-    const fallbackReadme = useRegistryReadme ? '' : await this.getFallbackReadme(name, registry);
-    const weeklyDownloads = await this.getWeeklyDownloads(name);
-    const readme = useRegistryReadme ? registry.readme : (fallbackReadme || 'This package does not publish README content to the npm registry.');
     const resolvedVersion = dependency && dependency.resolvedVersion ? dependency.resolvedVersion : versionInfo.version;
     const updateInfo = getUpdateInfo(resolvedVersion, registry.latestVersion);
     const lockPackage = dependency && dependency.lockStatus ? dependency : this.lockInfo.packages.get(name);
-    const security = await this.security.getPackageSecurity({
-      name,
-      resolvedVersion,
-      dependency,
-      lockPackage,
-      lockInfo: this.lockInfo
-    });
+    const [fallbackReadme, weeklyDownloads, security] = await Promise.all([
+      useRegistryReadme ? Promise.resolve('') : this.getFallbackReadme(name, registry),
+      this.getWeeklyDownloads(name),
+      this.security.getPackageSecurity({
+        name,
+        resolvedVersion,
+        dependency,
+        lockPackage,
+        lockInfo: this.lockInfo
+      })
+    ]);
+    const readme = useRegistryReadme ? registry.readme : (fallbackReadme || 'This package does not publish README content to the npm registry.');
 
     return {
       name,
