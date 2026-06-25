@@ -35,12 +35,6 @@
     "updates"
   ],
   "qna": false,
-  "activationEvents": [
-    "onView:workspaceNpmSidebar.dependenciesView",
-    "onCommand:workspaceNpmSidebar.show",
-    "onCommand:workspaceNpmSidebar.refresh",
-    "onCommand:workspaceNpmSidebar.openPackage"
-  ],
   "main": "./extension.js",
   "scripts": {
     "check": "node --check extension.js && node --check lib/security.js && node --check media/main.js",
