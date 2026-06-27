@@ -2,7 +2,7 @@
   "name": "npm-dependency-manager",
   "displayName": "npm-dependency-manager",
   "description": "Inspect workspace npm dependencies, updates, package-lock data, README content, and vulnerability signals from the VS Code sidebar.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "noritaka1166",
   "license": "MIT",
   "icon": "media/icon.png",

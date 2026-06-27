@@ -1,5 +1,15 @@
 # Change Log
 
+## 0.0.4
+
+- Added a column picker for showing and hiding dependency table columns.
+- Added resizable dependency table columns with persisted column width preferences.
+- Persisted search, dependency type, risk, update, and license filters per workspace.
+- Improved loading and empty-state handling while package.json files and dependency data are being scanned.
+- Optimized package detail loading by fetching independent metadata, downloads, README fallback, and security data in parallel where possible.
+- Optimized security checks by extracting security logic into a dedicated service, improving cache handling, and deferring heavier transitive OSV tree checks to package detail views.
+- Simplified VS Code activation metadata and expanded syntax checks to include the extracted security module.
+
 ## 0.0.3
 
 - Added OSV vulnerability checks for direct and transitive dependencies.

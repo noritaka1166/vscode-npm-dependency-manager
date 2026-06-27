@@ -13,8 +13,10 @@ npm-dependency-manager helps you inspect npm dependencies without leaving VS Cod
 - Expands packages in the sidebar to browse transitive dependencies from npm registry metadata.
 - Searches package names and descriptions without refetching registry data.
 - Filters by `dependencies`, `devDependencies`, vulnerable packages, deprecated packages, unknown audit state, healthy packages, and update candidates.
+- Remembers search and filter selections per workspace.
 - Shows package licenses in the dependency list and filters by detected license.
 - Compares the requested version, package-lock resolved version, latest version, and publish dates.
+- Lets you show, hide, and resize dependency table columns, with column preferences remembered.
 - Highlights major, minor, and patch update candidates.
 - Runs guarded update actions from the list or package detail page with a confirmation prompt.
 - Reads `package-lock.json` for resolved versions, lock paths, and dependency tree context.
@@ -47,7 +49,8 @@ Vulnerability and dependency tree results are most accurate when a `package-lock
 3. Pick a `package.json` from the dashboard dropdown when the workspace contains more than one.
 4. Use the sticky search and filters to narrow the list.
 5. Select a package to open the package detail page.
-6. Expand packages in the sidebar to inspect transitive dependencies.
+6. Adjust visible columns or resize column widths when you want a denser or simpler table.
+7. Expand packages in the sidebar to inspect transitive dependencies.
 
 ## Commands
 
