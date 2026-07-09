@@ -90,6 +90,6 @@
     "@types/vscode": "^1.90.0"
   },
   "dependencies": {
-    "markdown-it": "^14.2.0"
+    "markdown-it": "^14.3.0"
   }
 }
