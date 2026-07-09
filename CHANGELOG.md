@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.0.5
+
+- Improved Marketplace discoverability with a clearer extension description, the Linters category, and expanded npm, security, license, and update-related keywords.
+- Redesigned the dependency icon and added it to the Dependencies view.
+- Updated `markdown-it` from 14.2.0 to 14.3.0, including the updated `linkify-it` transitive dependency.
+
 ## 0.0.4
 
 - Added a column picker for showing and hiding dependency table columns.
