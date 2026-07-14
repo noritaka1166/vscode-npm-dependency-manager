@@ -9,6 +9,8 @@ npm-dependency-manager helps you inspect npm dependencies without leaving VS Cod
 ## Features
 
 - Finds workspace `package.json` files and prefers the workspace root `package.json` by default.
+- Detects npm, pnpm, Yarn, or Bun from the `packageManager` field first, then from `package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lock`, or `bun.lockb`.
+- Uses the detected package manager for update actions and package detail install commands.
 - Shows only the selected `package.json` dependencies in the sidebar.
 - Expands packages in the sidebar to browse transitive dependencies from npm registry metadata.
 - Searches package names and descriptions without refetching registry data.
@@ -61,6 +63,7 @@ Vulnerability and dependency tree results are most accurate when a `package-lock
 ## Known Limitations
 
 - npm audit and OSV checks require a resolved package version. Add or update `package-lock.json` for packages that show `Vulnerabilities not checked`.
+- Per-package lockfile parsing, resolved versions, and dependency tree context currently support `package-lock.json`. pnpm, Yarn, and Bun lockfiles are detected and used for update-command selection.
 - Transitive vulnerability attribution depends on the dependency graph recorded in `package-lock.json`.
 - EPSS and KEV signals are shown only for advisories that expose CVE identifiers.
 - README rendering supports common npm/GitHub Markdown, but unusual HTML or repository asset layouts may not render exactly like npmjs.com.

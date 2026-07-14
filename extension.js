@@ -3,6 +3,7 @@ const path = require('node:path');
 const MarkdownIt = require('markdown-it');
 const { SecurityService } = require('./lib/security');
 const { normalizeRepositoryUrl } = require('./lib/repository');
+const { PACKAGE_MANAGERS, createPackageInstallCommand, detectPackageManager } = require('./lib/package-manager');
 
 const VIEW_ID = 'workspaceNpmSidebar.dependenciesView';
 const PANEL_TYPE = 'workspaceNpmSidebar.dashboard';
@@ -82,6 +83,7 @@ class NpmWorkspaceModel {
     this.isLoading = false;
     this.message = '';
     this.lockInfo = createMissingLockInfo('');
+    this.packageManager = this.lockInfo.packageManager;
     this.registryCache = new Map();
     this.dependencyCache = new Map();
     this.security = new SecurityService();
@@ -225,7 +227,8 @@ class NpmWorkspaceModel {
     this.emit();
 
     const packageJson = await readPackageJson(this.selectedPackageJson);
-    this.lockInfo = await readPackageLock(this.selectedPackageJson);
+    this.lockInfo = await readLockInfo(this.selectedPackageJson, packageJson);
+    this.packageManager = this.lockInfo.packageManager;
     this.dependencyCounts = getDependencyCounts(packageJson);
     const entries = collectDependencyEntries(packageJson, 'all');
 
@@ -264,7 +267,7 @@ class NpmWorkspaceModel {
       latestVersion: registry.latestVersion,
       resolvedPublishedAt: getPublishedAt(registry.time, resolvedVersion || versionInfo.version),
       latestPublishedAt: getPublishedAt(registry.time, registry.latestVersion),
-      lockStatus: lockPackage?.version ? 'locked' : 'unlocked',
+      lockStatus: getDependencyLockStatus(lockPackage, this.lockInfo),
       lockPath: lockPackage?.path ? lockPackage.path : '',
       lockResolved: lockPackage?.resolved ? lockPackage.resolved : '',
       lockIntegrity: lockPackage?.integrity ? lockPackage.integrity : '',
@@ -338,7 +341,7 @@ class NpmWorkspaceModel {
       parentVersion: dependency?.parentVersion ? dependency.parentVersion : '',
       parentRange: dependency?.parentRange ? dependency.parentRange : '',
       resolvedFromVersion: dependency?.resolvedFromVersion ? dependency.resolvedFromVersion : '',
-      lockStatus: lockPackage?.lockStatus ? lockPackage.lockStatus : (lockPackage?.version ? 'locked' : 'unlocked'),
+      lockStatus: lockPackage?.lockStatus ? lockPackage.lockStatus : getDependencyLockStatus(lockPackage, this.lockInfo),
       lockPath: lockPackage?.lockPath ? lockPackage.lockPath : (lockPackage?.path ? lockPackage.path : ''),
       lockResolved: lockPackage?.lockResolved ? lockPackage.lockResolved : (lockPackage?.resolved ? lockPackage.resolved : ''),
       lockIntegrity: lockPackage?.lockIntegrity ? lockPackage.lockIntegrity : (lockPackage?.integrity ? lockPackage.integrity : ''),
@@ -351,8 +354,11 @@ class NpmWorkspaceModel {
         label: this.lockInfo.path ? vscode.workspace.asRelativePath(this.lockInfo.path, false) : '',
         lockfileVersion: this.lockInfo.lockfileVersion,
         packageCount: this.lockInfo.packageCount,
-        error: this.lockInfo.error
+        error: this.lockInfo.error,
+        packageManager: this.packageManager
       },
+      packageManager: this.packageManager,
+      installCommand: createPackageInstallCommand(this.packageManager, name, dependency?.type || 'dependencies'),
       npmUrl: `https://www.npmjs.com/package/${name}`,
       homepage: registry.homepage,
       repository: registry.repository,
@@ -533,13 +539,15 @@ class NpmWorkspaceModel {
       dependencyCounts: this.dependencyCounts,
       isLoading: this.isLoading,
       cacheStats: this.getCacheStats(),
+      packageManager: this.packageManager,
       lockInfo: {
         exists: this.lockInfo.exists,
         path: this.lockInfo.path,
         label: this.lockInfo.path ? vscode.workspace.asRelativePath(this.lockInfo.path, false) : '',
         lockfileVersion: this.lockInfo.lockfileVersion,
         packageCount: this.lockInfo.packageCount,
-        error: this.lockInfo.error
+        error: this.lockInfo.error,
+        packageManager: this.packageManager
       },
       dependencies: filterDependencyType(this.allDependencies, this.filter),
       message: this.message
@@ -563,15 +571,15 @@ class NpmWorkspaceModel {
     }
 
     const effectiveType = knownDependency.type || 'dependencies';
-    const saveFlag = effectiveType === 'devDependencies' ? '--save-dev' : '--save';
     const specifier = `${name}@${version}`;
-    const command = `npm install ${shellQuote(specifier)} ${saveFlag}`;
+    const command = createPackageInstallCommand(this.packageManager, specifier, effectiveType);
 
     return {
       name,
       version,
       command,
-      cwd: path.dirname(this.selectedPackageJson)
+      cwd: path.dirname(this.selectedPackageJson),
+      packageManager: this.packageManager
     };
   }
 
@@ -794,7 +802,7 @@ class DashboardPanel {
     }
 
     const terminal = vscode.window.createTerminal({
-      name: 'npm dependency update',
+      name: `${command.packageManager.label} dependency update`,
       cwd: command.cwd
     });
     terminal.show();
@@ -895,9 +903,38 @@ async function readPackageJson(fsPath) {
   return JSON.parse(Buffer.from(bytes).toString('utf8'));
 }
 
-async function readPackageLock(packageJsonPath) {
-  const lockPath = path.join(path.dirname(packageJsonPath), 'package-lock.json');
-  const lockInfo = createMissingLockInfo(lockPath);
+async function readLockInfo(packageJsonPath, packageJson) {
+  const directory = path.dirname(packageJsonPath);
+  const lockfiles = await findLockfiles(directory);
+  const packageManager = detectPackageManager(packageJson, lockfiles);
+  const fallbackLockfile = PACKAGE_MANAGERS[packageManager.id].lockfiles[0];
+  const lockPath = path.join(directory, packageManager.lockfile || fallbackLockfile);
+
+  if (packageManager.id !== 'npm') {
+    const lockInfo = createMissingLockInfo(lockPath, packageManager);
+    lockInfo.exists = packageManager.hasLockfile;
+    return lockInfo;
+  }
+
+  return readNpmPackageLock(lockPath, packageManager);
+}
+
+async function findLockfiles(directory) {
+  const lockfiles = [...new Set(Object.values(PACKAGE_MANAGERS).flatMap((manager) => manager.lockfiles))];
+  const results = await Promise.all(lockfiles.map(async (lockfile) => {
+    try {
+      const stat = await vscode.workspace.fs.stat(vscode.Uri.file(path.join(directory, lockfile)));
+      return stat.type & vscode.FileType.File ? lockfile : '';
+    } catch {
+      return '';
+    }
+  }));
+
+  return results.filter(Boolean);
+}
+
+async function readNpmPackageLock(lockPath, packageManager) {
+  const lockInfo = createMissingLockInfo(lockPath, packageManager);
 
   try {
     const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(lockPath));
@@ -930,7 +967,7 @@ async function readPackageLock(packageJsonPath) {
   return lockInfo;
 }
 
-function createMissingLockInfo(lockPath) {
+function createMissingLockInfo(lockPath, packageManager = detectPackageManager({}, [])) {
   const packages = new Map();
   const paths = new Map();
   packages.paths = paths;
@@ -942,7 +979,8 @@ function createMissingLockInfo(lockPath) {
     packageCount: 0,
     packages,
     paths,
-    error: ''
+    error: '',
+    packageManager
   };
 }
 
@@ -960,6 +998,16 @@ function normalizeLockPackage(name, info, packagePath) {
     optionalDependencies: info.optionalDependencies || {},
     depth: getLockPackageDepth(packagePath)
   };
+}
+
+function getDependencyLockStatus(lockPackage, lockInfo) {
+  if (lockPackage?.version) {
+    return 'locked';
+  }
+  if (lockInfo?.exists && lockInfo.packageManager?.id !== 'npm') {
+    return 'notParsed';
+  }
+  return 'unlocked';
 }
 
 function getLockPackageDepth(packagePath) {
@@ -1565,10 +1613,6 @@ async function mapWithConcurrency(items, limit, mapper) {
 
 function getErrorMessage(error) {
   return error?.message ? error.message : String(error);
-}
-
-function shellQuote(value) {
-  return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
 function getNonce() {

@@ -88,7 +88,7 @@
           <p>${escapeHtml(state.selectedLabel || state.selectedPackageJson || 'No package.json selected')}</p>
         </div>
         <div class="headerActions">
-          <span class="headerMeta">${renderCompactStatus(state.lockInfo, state.cacheStats)}</span>
+          <span class="headerMeta">${renderCompactStatus(state.packageManager, state.lockInfo, state.cacheStats)}</span>
           <button id="refreshAllButton" class="secondaryButton" title="Clear cache and reload registry data">Refresh all</button>
         </div>
       </section>
@@ -543,7 +543,7 @@
           <aside class="packageSidebar">
             <section class="sideSection">
               <h2>Install</h2>
-              <code class="installCommand">npm i ${escapeHtml(detail.name)}</code>
+              <code class="installCommand">${escapeHtml(detail.installCommand || `npm install ${detail.name}`)}</code>
               ${renderDetailUpdateAction(detail)}
             </section>
 
@@ -564,6 +564,7 @@
             <section class="sideSection">
               <h2>Lockfile</h2>
               <dl class="facts">
+                <div><dt>Manager</dt><dd>${renderPackageManager(detail.packageManager)}</dd></div>
                 <div><dt>Status</dt><dd>${renderLockBadge(detail)}</dd></div>
                 ${detail?.lockInfo.label ? `<div><dt>File</dt><dd>${escapeHtml(detail.lockInfo.label)}</dd></div>` : ''}
                 ${detail?.lockInfo.lockfileVersion ? `<div><dt>lockfileVersion</dt><dd>${escapeHtml(detail.lockInfo.lockfileVersion)}</dd></div>` : ''}
@@ -710,13 +711,14 @@
     return `<div class="cacheSummary"><span>cache</span><strong>${formatNumber(total)} entries</strong><small>registry ${formatNumber(stats.registry || 0)} / audit ${formatNumber(stats.audit || 0)} / OSV ${formatNumber(stats.osv || 0)} / EPSS ${formatNumber(stats.epss || 0)}</small></div>`;
   }
 
-  function renderCompactStatus(lockInfo, cacheStats) {
+  function renderCompactStatus(packageManager, lockInfo, cacheStats) {
     const stats = cacheStats || {};
     const cacheTotal = ['registry', 'dependencies', 'audit', 'osv', 'epss', 'readme', 'downloads'].reduce((sum, key) => {
       return sum + (Number.isFinite(stats[key]) ? stats[key] : 0);
     }, 0);
-    const lockLabel = lockInfo && lockInfo.exists ? `lock v${lockInfo.lockfileVersion || '?'}` : 'no lock';
-    return `${escapeHtml(lockLabel)} / cache ${formatNumber(cacheTotal)}`;
+    const managerLabel = formatPackageManager(packageManager);
+    const lockLabel = lockInfo && lockInfo.exists ? (lockInfo.label || packageManager?.lockfile || 'lockfile') : 'no lock';
+    return `${escapeHtml(managerLabel)} / ${escapeHtml(lockLabel)} / cache ${formatNumber(cacheTotal)}`;
   }
 
   function renderLockSummary(lockInfo) {
@@ -724,20 +726,38 @@
       return '';
     }
     if (lockInfo.error) {
-      return `<div class="lockSummary warning"><span>package-lock</span><strong>Could not read lockfile</strong><small>${escapeHtml(lockInfo.error)}</small></div>`;
+      return `<div class="lockSummary warning"><span>${escapeHtml(formatPackageManager(lockInfo.packageManager))}</span><strong>Could not read lockfile</strong><small>${escapeHtml(lockInfo.error)}</small></div>`;
     }
     if (!lockInfo.exists) {
-      return '<div class="lockSummary warning"><span>package-lock</span><strong>Not found</strong><small>Resolved versions and vulnerability checks may be less accurate.</small></div>';
+      return `<div class="lockSummary warning"><span>${escapeHtml(formatPackageManager(lockInfo.packageManager))}</span><strong>Lockfile not found</strong><small>Resolved versions and vulnerability checks may be less accurate.</small></div>`;
     }
 
     const version = lockInfo.lockfileVersion ? `v${escapeHtml(lockInfo.lockfileVersion)}` : 'version unknown';
+    const parseNote = lockInfo.packageManager?.id === 'npm' ? `${formatNumber(lockInfo.packageCount)} locked packages` : 'Lockfile detected; detailed parsing is currently available for npm only.';
     return `
       <div class="lockSummary">
-        <span>package-lock</span>
-        <strong>${escapeHtml(lockInfo.label || 'package-lock.json')}</strong>
-        <small>${version} &middot; ${formatNumber(lockInfo.packageCount)} locked packages</small>
+        <span>${escapeHtml(formatPackageManager(lockInfo.packageManager))}</span>
+        <strong>${escapeHtml(lockInfo.label || lockInfo.packageManager?.lockfile || 'lockfile')}</strong>
+        <small>${version} &middot; ${parseNote}</small>
       </div>
     `;
+  }
+
+  function formatPackageManager(packageManager) {
+    if (!packageManager) {
+      return 'npm';
+    }
+    return `${packageManager.label || packageManager.id || 'npm'}${packageManager.version ? ` ${packageManager.version}` : ''}`;
+  }
+
+  function renderPackageManager(packageManager) {
+    const sourceLabels = {
+      packageManager: 'package.json',
+      lockfile: 'lockfile',
+      default: 'default'
+    };
+    const source = packageManager?.source ? ` (${sourceLabels[packageManager.source] || packageManager.source})` : '';
+    return `${escapeHtml(formatPackageManager(packageManager))}${escapeHtml(source)}`;
   }
 
   function renderDate(value) {
@@ -788,6 +808,9 @@
   function renderLockBadge(dependency) {
     if (dependency.lockStatus === 'locked') {
       return `<span class="lockBadge locked" title="${escapeAttr(dependency.lockPath || 'Locked in package-lock.json')}">locked</span>`;
+    }
+    if (dependency.lockStatus === 'notParsed') {
+      return '<span class="lockBadge unlocked" title="A lockfile was detected, but per-package lock details are currently available for npm only.">detected</span>';
     }
     return '<span class="lockBadge unlocked" title="Not found in package-lock.json">unlocked</span>';
   }

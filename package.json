@@ -47,7 +47,7 @@
   "qna": false,
   "main": "./extension.js",
   "scripts": {
-    "check": "node --check extension.js && node --check lib/security.js && node --check lib/repository.js && node --check media/main.js",
+    "check": "node --check extension.js && node --check lib/security.js && node --check lib/repository.js && node --check lib/package-manager.js && node --check media/main.js",
     "test": "node --test",
     "vscode:prepublish": "npm run check",
     "package": "npx @vscode/vsce package",

@@ -1,5 +1,10 @@
 # Change Log
 
+## Unreleased
+
+- Added automatic npm, pnpm, Yarn, and Bun detection from the `packageManager` field and common lockfiles.
+- Updated dependency update actions and install-command hints to use the detected package manager.
+
 ## 0.0.5
 
 - Improved Marketplace discoverability with a clearer extension description, the Linters category, and expanded npm, security, license, and update-related keywords.
