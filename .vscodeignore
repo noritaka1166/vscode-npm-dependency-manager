@@ -10,3 +10,4 @@ work/**
 **/.DS_Store
 node_modules/@types/**
 node_modules/.bin/**
+test/**
