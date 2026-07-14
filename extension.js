@@ -2,6 +2,7 @@ const vscode = require('vscode');
 const path = require('node:path');
 const MarkdownIt = require('markdown-it');
 const { SecurityService } = require('./lib/security');
+const { normalizeRepositoryUrl } = require('./lib/repository');
 
 const VIEW_ID = 'workspaceNpmSidebar.dependenciesView';
 const PANEL_TYPE = 'workspaceNpmSidebar.dashboard';
@@ -497,7 +498,7 @@ class NpmWorkspaceModel {
       readme: data.readme || '',
       readmeFilename: data.readmeFilename || '',
       homepage: data.homepage || '',
-      repository: normalizeRepository(data.repository),
+      repository: normalizeRepositoryUrl(data.repository),
       license: data.license || '',
       author: normalizePerson(data.author),
       publisher: normalizePerson(data._npmUser),
@@ -1456,16 +1457,6 @@ function resolveVersionInfo(registry, requestedRange) {
     version: fallbackVersion || '',
     manifest: fallbackVersion ? versions[fallbackVersion] : {}
   };
-}
-
-function normalizeRepository(repository) {
-  if (!repository) {
-    return '';
-  }
-  if (typeof repository === 'string') {
-    return repository;
-  }
-  return repository.url || '';
 }
 
 function normalizePerson(person) {

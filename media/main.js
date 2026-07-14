@@ -75,6 +75,8 @@
     }
   });
 
+  bindExternalLinks();
+
   function renderList() {
     const counts = state.dependencyCounts || { dependencies: 0, devDependencies: 0 };
     const visibleDependencies = getVisibleDependencies();
@@ -603,18 +605,12 @@
       vscode.postMessage({ type: 'refreshPackage', name: event.currentTarget.dataset.package });
     });
     bindPackageButtons();
-    bindReadmeLinks();
   }
 
-  function bindReadmeLinks() {
-    const readme = document.querySelector('.readme');
-    if (!readme) {
-      return;
-    }
-
-    readme.addEventListener('click', (event) => {
+  function bindExternalLinks() {
+    app.addEventListener('click', (event) => {
       const link = event.target.closest('a[href]');
-      if (!link || !readme.contains(link)) {
+      if (!link || !app.contains(link)) {
         return;
       }
 
