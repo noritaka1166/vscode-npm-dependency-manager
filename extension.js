@@ -295,7 +295,13 @@ class NpmWorkspaceModel {
   async getDetail(name, dependencyHint) {
     const dependency = dependencyHint || this.findKnownDependency(name);
     const lockPackage = dependency?.lockStatus ? dependency : this.lockInfo.packages.get(name);
-    const initialResolvedVersion = dependency?.resolvedVersion ? dependency.resolvedVersion : '';
+    const detailData = await this.loadDetailData(name, dependency, lockPackage);
+
+    return this.buildDetail(name, dependency, lockPackage, detailData);
+  }
+
+  async loadDetailData(name, dependency, lockPackage) {
+    const initialResolvedVersion = dependency?.resolvedVersion || '';
     const registryPromise = this.getRegistryPackage(name);
     const weeklyDownloadsPromise = this.getWeeklyDownloads(name);
     const earlySecurityPromise = initialResolvedVersion
@@ -309,11 +315,11 @@ class NpmWorkspaceModel {
       : null;
 
     const registry = await registryPromise;
-    const versionInfo = resolveVersionInfo(registry, dependency && (dependency.resolvedVersion || dependency.currentVersion));
+    const versionInfo = resolveVersionInfo(registry, dependency?.resolvedVersion || dependency?.currentVersion);
     const useRegistryReadme = isUsefulReadme(registry.readme);
     const resolvedVersion = initialResolvedVersion || versionInfo.version;
     const updateInfo = getUpdateInfo(resolvedVersion, registry.latestVersion);
-    const securityPromise = earlySecurityPromise || this.security.getPackageSecurity({
+    const securityPromise = earlySecurityPromise ?? this.security.getPackageSecurity({
       name,
       resolvedVersion,
       dependency,
@@ -325,57 +331,38 @@ class NpmWorkspaceModel {
       weeklyDownloadsPromise,
       securityPromise
     ]);
-    const readme = useRegistryReadme ? registry.readme : (fallbackReadme || 'This package does not publish README content to the npm registry.');
+    const readme = resolveDetailReadme(registry.readme, fallbackReadme, useRegistryReadme);
+
+    return {
+      registry,
+      versionInfo,
+      resolvedVersion,
+      updateInfo,
+      security,
+      weeklyDownloads,
+      readme
+    };
+  }
+
+  buildDetail(name, dependency, lockPackage, detailData) {
+    const { registry, versionInfo, resolvedVersion, updateInfo, security, weeklyDownloads, readme } = detailData;
 
     return {
       name,
       description: registry.description,
-      type: dependency?.type ? dependency.type : '',
-      currentVersion: dependency?.currentVersion ? dependency.currentVersion : '',
+      ...getDependencyDetailFields(dependency),
       latestVersion: registry.latestVersion,
       resolvedVersion,
       resolvedPublishedAt: getPublishedAt(registry.time, resolvedVersion),
       latestPublishedAt: getPublishedAt(registry.time, registry.latestVersion),
       updateType: updateInfo.type,
       updateLabel: updateInfo.label,
-      dependencyPath: dependency?.dependencyPath ? dependency.dependencyPath : '',
-      dependencyDepth: dependency && Number.isFinite(dependency.dependencyDepth) ? dependency.dependencyDepth : 0,
-      parentName: dependency?.parentName ? dependency.parentName : '',
-      parentVersion: dependency?.parentVersion ? dependency.parentVersion : '',
-      parentRange: dependency?.parentRange ? dependency.parentRange : '',
-      resolvedFromVersion: dependency?.resolvedFromVersion ? dependency.resolvedFromVersion : '',
-      lockStatus: lockPackage?.lockStatus ? lockPackage.lockStatus : getDependencyLockStatus(lockPackage, this.lockInfo),
-      lockPath: lockPackage?.lockPath ? lockPackage.lockPath : (lockPackage?.path ? lockPackage.path : ''),
-      lockResolved: lockPackage?.lockResolved ? lockPackage.lockResolved : (lockPackage?.resolved ? lockPackage.resolved : ''),
-      lockIntegrity: lockPackage?.lockIntegrity ? lockPackage.lockIntegrity : (lockPackage?.integrity ? lockPackage.integrity : ''),
-      lockDev: Boolean(lockPackage && (lockPackage.lockDev || lockPackage.dev)),
-      lockOptional: Boolean(lockPackage && (lockPackage.lockOptional || lockPackage.optional)),
-      lockPeer: Boolean(lockPackage && (lockPackage.lockPeer || lockPackage.peer)),
-      lockInfo: {
-        exists: this.lockInfo.exists,
-        path: this.lockInfo.path,
-        label: this.lockInfo.path ? vscode.workspace.asRelativePath(this.lockInfo.path, false) : '',
-        lockfileVersion: this.lockInfo.lockfileVersion,
-        packageCount: this.lockInfo.packageCount,
-        error: this.lockInfo.error,
-        packageManager: this.packageManager
-      },
+      ...getLockPackageDetailFields(lockPackage, this.lockInfo),
+      lockInfo: getDetailLockInfo(this.lockInfo, this.packageManager),
       packageManager: this.packageManager,
-      installCommand: createPackageInstallCommand(this.packageManager, name, dependency?.type || 'dependencies'),
+      installCommand: createPackageInstallCommand(this.packageManager, name, getDependencyType(dependency)),
       npmUrl: `https://www.npmjs.com/package/${name}`,
-      homepage: registry.homepage,
-      repository: registry.repository,
-      license: registry.license,
-      author: registry.author,
-      publisher: registry.publisher,
-      maintainers: registry.maintainers,
-      keywords: registry.keywords,
-      distTags: registry.distTags,
-      createdAt: registry.createdAt,
-      modifiedAt: registry.modifiedAt,
-      versionCount: registry.versionCount,
-      deprecated: Boolean(versionInfo.manifest?.deprecated),
-      deprecatedMessage: versionInfo.manifest?.deprecated ? versionInfo.manifest.deprecated : '',
+      ...getRegistryDetailFields(registry, versionInfo),
       ...security,
       weeklyDownloads,
       cacheStats: this.getCacheStats(),
@@ -402,6 +389,7 @@ class NpmWorkspaceModel {
       this.downloadCache.set(name, downloads);
       return downloads;
     } catch (error) {
+      reportOptionalFailure(`npm download count lookup failed for ${name}`, error);
       this.downloadCache.set(name, null);
       return null;
     }
@@ -426,6 +414,7 @@ class NpmWorkspaceModel {
           return readme;
         }
       } catch (error) {
+        reportOptionalFailure(`README fallback lookup failed for ${url}`, error);
         continue;
       }
     }
@@ -927,13 +916,18 @@ async function findLockfiles(directory) {
   const results = await Promise.all(lockfiles.map(async (lockfile) => {
     try {
       const stat = await vscode.workspace.fs.stat(vscode.Uri.file(path.join(directory, lockfile)));
-      return stat.type & vscode.FileType.File ? lockfile : '';
+      return isFileType(stat.type) ? lockfile : '';
     } catch {
       return '';
     }
   }));
 
   return results.filter(Boolean);
+}
+
+function isFileType(type) {
+  return type === vscode.FileType.File
+    || type === vscode.FileType.File + vscode.FileType.SymbolicLink;
 }
 
 async function readNpmPackageLock(lockPath, packageManager) {
@@ -1229,7 +1223,9 @@ function getUpdateInfo(currentRange, latestVersion) {
 }
 
 function parseSemver(value) {
-  const match = String(value || '').match(/(\d+)\.(\d+)\.(\d+)/);
+  const normalized = String(value || '').replace(/^[~^<>=\s]+/, '');
+  const semverPattern = /^(\d{1,10})\.(\d{1,10})\.(\d{1,10})(?:\D|$)/;
+  const match = semverPattern.exec(normalized);
   if (!match) {
     return null;
   }
@@ -1247,6 +1243,78 @@ function getPublishedAt(timeMap, version) {
   return timeMap[version];
 }
 
+function resolveDetailReadme(registryReadme, fallbackReadme, useRegistryReadme) {
+  if (useRegistryReadme) {
+    return registryReadme;
+  }
+  return fallbackReadme || 'This package does not publish README content to the npm registry.';
+}
+
+function getDependencyDetailFields(dependency) {
+  const source = dependency || {};
+  return {
+    type: source.type || '',
+    currentVersion: source.currentVersion || '',
+    dependencyPath: source.dependencyPath || '',
+    dependencyDepth: Number.isFinite(source.dependencyDepth) ? source.dependencyDepth : 0,
+    parentName: source.parentName || '',
+    parentVersion: source.parentVersion || '',
+    parentRange: source.parentRange || '',
+    resolvedFromVersion: source.resolvedFromVersion || ''
+  };
+}
+
+function getDependencyType(dependency) {
+  return dependency?.type || 'dependencies';
+}
+
+function getLockPackageDetailFields(lockPackage, lockInfo) {
+  return {
+    lockStatus: lockPackage?.lockStatus || getDependencyLockStatus(lockPackage, lockInfo),
+    lockPath: getPreferredLockValue(lockPackage, 'lockPath', 'path'),
+    lockResolved: getPreferredLockValue(lockPackage, 'lockResolved', 'resolved'),
+    lockIntegrity: getPreferredLockValue(lockPackage, 'lockIntegrity', 'integrity'),
+    lockDev: Boolean(lockPackage?.lockDev || lockPackage?.dev),
+    lockOptional: Boolean(lockPackage?.lockOptional || lockPackage?.optional),
+    lockPeer: Boolean(lockPackage?.lockPeer || lockPackage?.peer)
+  };
+}
+
+function getPreferredLockValue(lockPackage, preferredKey, fallbackKey) {
+  return lockPackage?.[preferredKey] || lockPackage?.[fallbackKey] || '';
+}
+
+function getDetailLockInfo(lockInfo, packageManager) {
+  return {
+    exists: lockInfo.exists,
+    path: lockInfo.path,
+    label: lockInfo.path ? vscode.workspace.asRelativePath(lockInfo.path, false) : '',
+    lockfileVersion: lockInfo.lockfileVersion,
+    packageCount: lockInfo.packageCount,
+    error: lockInfo.error,
+    packageManager
+  };
+}
+
+function getRegistryDetailFields(registry, versionInfo) {
+  const deprecatedMessage = versionInfo.manifest?.deprecated || '';
+  return {
+    homepage: registry.homepage,
+    repository: registry.repository,
+    license: registry.license,
+    author: registry.author,
+    publisher: registry.publisher,
+    maintainers: registry.maintainers,
+    keywords: registry.keywords,
+    distTags: registry.distTags,
+    createdAt: registry.createdAt,
+    modifiedAt: registry.modifiedAt,
+    versionCount: registry.versionCount,
+    deprecated: Boolean(deprecatedMessage),
+    deprecatedMessage
+  };
+}
+
 function renderReadmeHtml(readme) {
   return sanitizeReadmeHtml(markdown.render(String(readme || '')));
 }
@@ -1259,10 +1327,10 @@ async function resolveReadmeAssetUrls(readme, readmeUrl) {
   const assetUrlMap = await getReadmeAssetUrlMap(readme, readmeUrl, baseUrl);
 
   return String(readme || '')
-    .replace(/(!?\[[^\]]*]\()([^)\s]+)(\))/g, (match, prefix, url, suffix) => {
+    .replace(/(!?\[[^\]\r\n]{0,1000}]\()([^)\s]{1,2048})(\))/g, (match, prefix, url, suffix) => {
       return `${prefix}${resolveReadmeUrl(url, baseUrl, assetUrlMap)}${suffix}`;
     })
-    .replace(/^(\s*\[[^\]]+]:\s*)(\S+)/gm, (match, prefix, url) => {
+    .replace(/^([ \t]{0,32}\[[^\]\r\n]{1,1000}]:[ \t]*)(\S{1,2048})/gm, (match, prefix, url) => {
       return `${prefix}${resolveReadmeUrl(url, baseUrl, assetUrlMap)}`;
     })
     .replace(/\s(src|href)\s*=\s*(['"])([^'"]+)\2/gi, (match, attr, quote, url) => {
@@ -1330,7 +1398,8 @@ function isRelativeAssetUrl(url) {
 }
 
 function getGitHubRawRootBaseUrl(readmeUrl) {
-  const match = String(readmeUrl || '').match(/^(https:\/\/raw\.githubusercontent\.com\/[^/]+\/[^/]+\/[^/]+\/)/i);
+  const rawRootPattern = /^(https:\/\/raw\.githubusercontent\.com\/[^/]+\/[^/]+\/[^/]+\/)/i;
+  const match = rawRootPattern.exec(String(readmeUrl || ''));
   return match ? match[1] : '';
 }
 
@@ -1341,13 +1410,14 @@ async function canFetchAsset(url) {
       return true;
     }
   } catch (error) {
-    // Some hosts reject HEAD. Fall through to GET.
+    reportOptionalFailure(`Asset HEAD request failed for ${url}; retrying with GET`, error);
   }
 
   try {
     const response = await fetch(url);
     return response.ok;
   } catch (error) {
+    reportOptionalFailure(`Asset GET request failed for ${url}`, error);
     return false;
   }
 }
@@ -1356,6 +1426,7 @@ function getReadmeBaseUrl(readmeUrl) {
   try {
     return new URL('.', readmeUrl).href;
   } catch (error) {
+    reportOptionalFailure(`Invalid README base URL: ${readmeUrl}`, error);
     return '';
   }
 }
@@ -1371,6 +1442,7 @@ function resolveReadmeUrl(value, baseUrl, assetUrlMap = new Map()) {
   try {
     return new URL(url, baseUrl).href;
   } catch (error) {
+    reportOptionalFailure(`Invalid relative README URL: ${url}`, error);
     return value;
   }
 }
@@ -1392,14 +1464,222 @@ function isReadmePath(value) {
 }
 
 function sanitizeReadmeHtml(html) {
-  return String(html || '')
-    .replace(/<script\b[\s\S]*?<\/script>/gi, '')
-    .replace(/<style\b[\s\S]*?<\/style>/gi, '')
-    .replace(/<(iframe|object|embed|form|input|button|textarea|select|meta|link)\b[\s\S]*?<\/\1>/gi, '')
-    .replace(/<(iframe|object|embed|form|input|button|textarea|select|meta|link)\b[^>]*>/gi, '')
-    .replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/\s+(href|src|srcset)\s*=\s*(['"])\s*javascript:[\s\S]*?\2/gi, '')
-    .replace(/<!--[\s\S]*?-->/g, '');
+  const blockedTags = ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'textarea', 'select', 'meta', 'link'];
+  const pairedTags = ['script', 'style', 'iframe', 'object', 'form', 'button', 'textarea', 'select'];
+  let sanitized = String(html || '');
+  pairedTags.forEach((tagName) => {
+    sanitized = removeHtmlElementBlocks(sanitized, tagName);
+  });
+
+  const withoutBlockedTags = removeHtmlTags(sanitized, blockedTags);
+  return sanitizeHtmlTagAttributes(withoutBlockedTags).replace(/<!--[\s\S]*?-->/g, '');
+}
+
+function sanitizeHtmlTagAttributes(html) {
+  const chunks = [];
+  let cursor = 0;
+
+  while (cursor < html.length) {
+    const start = html.indexOf('<', cursor);
+    if (start === -1) {
+      chunks.push(html.slice(cursor));
+      break;
+    }
+
+    const end = html.indexOf('>', start + 1);
+    if (end === -1) {
+      chunks.push(html.slice(cursor));
+      break;
+    }
+
+    chunks.push(
+      html.slice(cursor, start),
+      sanitizeHtmlTag(html.slice(start, end + 1))
+    );
+    cursor = end + 1;
+  }
+
+  return chunks.join('');
+}
+
+function sanitizeHtmlTag(tag) {
+  const prefixEnd = findHtmlTagNameEnd(tag);
+  if (prefixEnd === -1) {
+    return tag;
+  }
+
+  const chunks = [tag.slice(0, prefixEnd)];
+  let cursor = prefixEnd;
+  while (cursor < tag.length - 1) {
+    const attribute = readHtmlAttribute(tag, cursor);
+    if (!attribute) {
+      break;
+    }
+    if (!isUnsafeHtmlAttribute(attribute)) {
+      chunks.push(tag.slice(cursor, attribute.end));
+    }
+    cursor = attribute.end;
+  }
+  chunks.push(tag.slice(cursor));
+  return chunks.join('');
+}
+
+function findHtmlTagNameEnd(tag) {
+  let cursor = 1;
+  while (isHtmlWhitespace(tag[cursor])) {
+    cursor += 1;
+  }
+  if (!tag[cursor] || '/!?'.includes(tag[cursor])) {
+    return -1;
+  }
+  while (cursor < tag.length && !isHtmlAttributeBoundary(tag[cursor])) {
+    cursor += 1;
+  }
+  return cursor;
+}
+
+function readHtmlAttribute(tag, fromIndex) {
+  let cursor = fromIndex;
+  while (isHtmlWhitespace(tag[cursor])) {
+    cursor += 1;
+  }
+  if (!tag[cursor] || tag[cursor] === '/' || tag[cursor] === '>') {
+    return null;
+  }
+
+  const nameStart = cursor;
+  while (cursor < tag.length && !isHtmlAttributeBoundary(tag[cursor]) && tag[cursor] !== '=') {
+    cursor += 1;
+  }
+  const name = tag.slice(nameStart, cursor).toLowerCase();
+  while (isHtmlWhitespace(tag[cursor])) {
+    cursor += 1;
+  }
+
+  let value = '';
+  if (tag[cursor] === '=') {
+    const parsedValue = readHtmlAttributeValue(tag, cursor + 1);
+    value = parsedValue.value;
+    cursor = parsedValue.end;
+  }
+  return { name, value, end: cursor };
+}
+
+function readHtmlAttributeValue(tag, fromIndex) {
+  let cursor = fromIndex;
+  while (isHtmlWhitespace(tag[cursor])) {
+    cursor += 1;
+  }
+
+  const quote = tag[cursor];
+  if (quote === '"' || quote === "'") {
+    const endQuote = tag.indexOf(quote, cursor + 1);
+    const end = endQuote === -1 ? tag.length - 1 : endQuote + 1;
+    return { value: tag.slice(cursor + 1, endQuote === -1 ? end : endQuote), end };
+  }
+
+  const valueStart = cursor;
+  while (cursor < tag.length && !isHtmlAttributeBoundary(tag[cursor])) {
+    cursor += 1;
+  }
+  return { value: tag.slice(valueStart, cursor), end: cursor };
+}
+
+function isUnsafeHtmlAttribute(attribute) {
+  if (attribute.name.startsWith('on')) {
+    return true;
+  }
+  const urlAttributes = new Set(['href', 'src', 'srcset']);
+  return urlAttributes.has(attribute.name)
+    && attribute.value.trimStart().toLowerCase().startsWith('javascript:');
+}
+
+function isHtmlWhitespace(character) {
+  return character === ' ' || character === '\n' || character === '\r' || character === '\t' || character === '\f';
+}
+
+function isHtmlAttributeBoundary(character) {
+  return !character || isHtmlWhitespace(character) || character === '/' || character === '>';
+}
+
+function removeHtmlTags(html, blockedTagNames) {
+  const blockedTags = new Set(blockedTagNames);
+  const chunks = [];
+  let cursor = 0;
+
+  while (cursor < html.length) {
+    const start = html.indexOf('<', cursor);
+    if (start === -1) {
+      chunks.push(html.slice(cursor));
+      break;
+    }
+
+    const end = html.indexOf('>', start + 1);
+    if (end === -1) {
+      chunks.push(html.slice(cursor));
+      break;
+    }
+
+    const tagName = getHtmlTagName(html.slice(start + 1, end));
+    if (blockedTags.has(tagName)) {
+      chunks.push(html.slice(cursor, start));
+    } else {
+      chunks.push(html.slice(cursor, end + 1));
+    }
+    cursor = end + 1;
+  }
+
+  return chunks.join('');
+}
+
+function getHtmlTagName(tagContent) {
+  let normalized = tagContent.trimStart().toLowerCase();
+  if (normalized.startsWith('/')) {
+    normalized = normalized.slice(1).trimStart();
+  }
+
+  let end = 0;
+  while (end < normalized.length && /[a-z0-9]/.test(normalized[end])) {
+    end += 1;
+  }
+  return normalized.slice(0, end);
+}
+
+function removeHtmlElementBlocks(html, tagName) {
+  const lowerHtml = html.toLowerCase();
+  const openTag = `<${tagName}`;
+  const closeTag = `</${tagName}>`;
+  const chunks = [];
+  let cursor = 0;
+
+  while (cursor < html.length) {
+    const start = findHtmlTagStart(lowerHtml, openTag, cursor);
+    if (start === -1) {
+      chunks.push(html.slice(cursor));
+      break;
+    }
+
+    chunks.push(html.slice(cursor, start));
+    const end = lowerHtml.indexOf(closeTag, start + openTag.length);
+    if (end === -1) {
+      break;
+    }
+    cursor = end + closeTag.length;
+  }
+
+  return chunks.join('');
+}
+
+function findHtmlTagStart(lowerHtml, openTag, fromIndex) {
+  let index = lowerHtml.indexOf(openTag, fromIndex);
+  while (index !== -1) {
+    const boundary = lowerHtml[index + openTag.length];
+    if (!boundary || boundary === '>' || /\s/.test(boundary)) {
+      return index;
+    }
+    index = lowerHtml.indexOf(openTag, index + openTag.length);
+  }
+  return -1;
 }
 
 function getTreeDescription(dependency, ancestry = []) {
@@ -1573,7 +1853,8 @@ function getGitHubRepoInfo(value) {
     .replace(/^git:\/\//, 'https://')
     .replace(/\.git(#.*)?$/, '$1');
 
-  const match = normalized.match(/^https:\/\/github\.com\/([^/]+)\/([^/#]+)(?:\/(?:tree|blob)\/([^/#]+)(?:\/([^#]+))?)?(?:#.*)?$/i);
+  const repositoryPattern = /^https:\/\/github\.com\/([^/]+)\/([^/#]+)(?:\/(?:tree|blob)\/([^/#]+)(?:\/([^#]+))?)?(?:#.*)?$/i;
+  const match = repositoryPattern.exec(normalized);
   if (!match) {
     return null;
   }
@@ -1616,6 +1897,10 @@ async function mapWithConcurrency(items, limit, mapper) {
 
 function getErrorMessage(error) {
   return error?.message ? error.message : String(error);
+}
+
+function reportOptionalFailure(context, error) {
+  console.warn(`[npm-dependency-manager] ${context}: ${getErrorMessage(error)}`);
 }
 
 function getNonce() {
