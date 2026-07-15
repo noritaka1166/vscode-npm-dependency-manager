@@ -49,7 +49,13 @@
     columnWidths: normalizeColumnWidths(persistedState.columnWidths)
   };
 
+  const trustedMessageOrigin = window.location.origin;
+
   window.addEventListener('message', (event) => {
+    if (event.origin !== trustedMessageOrigin || !event.data || typeof event.data !== 'object') {
+      return;
+    }
+
     const message = event.data;
 
     if (message.type === 'loading') {

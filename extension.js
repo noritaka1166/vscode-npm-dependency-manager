@@ -1,4 +1,5 @@
 const vscode = require('vscode');
+const { randomBytes } = require('node:crypto');
 const path = require('node:path');
 const MarkdownIt = require('markdown-it');
 const { SecurityService } = require('./lib/security');
@@ -52,7 +53,9 @@ function activate(context) {
   model.refresh().catch((error) => vscode.window.showErrorMessage(getErrorMessage(error)));
 }
 
-function deactivate() {}
+function deactivate() {
+  // The extension does not hold resources that need explicit disposal.
+}
 
 async function openExternalUrl(value) {
   const url = String(value || '').trim();
@@ -1616,12 +1619,7 @@ function getErrorMessage(error) {
 }
 
 function getNonce() {
-  let text = '';
-  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  for (let i = 0; i < 32; i += 1) {
-    text += possible.charAt(Math.floor(Math.random() * possible.length));
-  }
-  return text;
+  return randomBytes(24).toString('base64url');
 }
 
 module.exports = { activate, deactivate };

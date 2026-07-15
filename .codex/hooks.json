@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".codex/hooks/sonar-secrets/build-scripts/prompt-secrets.sh",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}
