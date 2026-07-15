@@ -88,7 +88,7 @@
     const visibleDependencies = getVisibleDependencies();
     const dependencyContent = renderDependencyContent(visibleDependencies);
 
-    app.innerHTML = `
+    app.innerHTML = DOMPurify.sanitize(`
       <section class="dashboardHeader">
         <div class="headerTitle">
           <h1>npm Packages</h1>
@@ -170,7 +170,7 @@
           ${dependencyContent}
         </div>
       </section>
-    `;
+    `);
 
     const packageSelect = document.getElementById('packageSelect');
     if (packageSelect) {
@@ -259,7 +259,7 @@
       return;
     }
 
-    dependencyTable.innerHTML = renderDependencyTable(getVisibleDependencies());
+    dependencyTable.innerHTML = DOMPurify.sanitize(renderDependencyTable(getVisibleDependencies()));
     bindPackageButtons();
     bindColumnResizers();
   }
@@ -550,7 +550,7 @@
   }
 
   function renderDetail(detail) {
-    app.innerHTML = `
+    app.innerHTML = DOMPurify.sanitize(`
       <div class="detailPage">
         <header class="packageHeader">
           <button id="backButton" class="backButton" title="Back">‹</button>
@@ -627,7 +627,7 @@
           </aside>
         </div>
       </div>
-    `;
+    `);
 
     document.getElementById('backButton').addEventListener('click', () => {
       vscode.postMessage({ type: 'backToList' });
@@ -678,7 +678,14 @@
   }
 
   function renderLoading(message) {
-    app.innerHTML = `<div class="center"><div class="spinner"></div><p>${escapeHtml(message || 'Loading...')}</p></div>`;
+    const container = document.createElement('div');
+    container.className = 'center';
+    const spinner = document.createElement('div');
+    spinner.className = 'spinner';
+    const text = document.createElement('p');
+    text.textContent = String(message || 'Loading...');
+    container.append(spinner, text);
+    app.replaceChildren(container);
   }
 
   function renderInlineLoading(message) {
@@ -691,13 +698,16 @@
   }
 
   function renderError(message) {
-    app.innerHTML = `
-      <div class="center error">
-        <p>${escapeHtml(message)}</p>
-        <button id="retryButton">Refresh</button>
-      </div>
-    `;
-    document.getElementById('retryButton').addEventListener('click', () => vscode.postMessage({ type: 'ready' }));
+    const container = document.createElement('div');
+    container.className = 'center error';
+    const text = document.createElement('p');
+    text.textContent = String(message || '');
+    const retryButton = document.createElement('button');
+    retryButton.id = 'retryButton';
+    retryButton.textContent = 'Refresh';
+    retryButton.addEventListener('click', () => vscode.postMessage({ type: 'ready' }));
+    container.append(text, retryButton);
+    app.replaceChildren(container);
   }
 
   function segment(value, label) {

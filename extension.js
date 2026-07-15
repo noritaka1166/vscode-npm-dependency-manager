@@ -693,7 +693,10 @@ class DashboardPanel {
       {
         enableScripts: true,
         retainContextWhenHidden: true,
-        localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'media')]
+        localResourceRoots: [
+          vscode.Uri.joinPath(this.extensionUri, 'media'),
+          vscode.Uri.joinPath(this.extensionUri, 'node_modules', 'dompurify', 'dist')
+        ]
       }
     );
 
@@ -843,6 +846,7 @@ class DashboardPanel {
 
   getHtml(webview) {
     const nonce = getNonce();
+    const domPurifyScriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'node_modules', 'dompurify', 'dist', 'purify.min.js'));
     const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'main.js'));
     const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'styles.css'));
 
@@ -857,6 +861,7 @@ class DashboardPanel {
 </head>
 <body>
   <main id="app"></main>
+  <script nonce="${nonce}" src="${domPurifyScriptUri}"></script>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
