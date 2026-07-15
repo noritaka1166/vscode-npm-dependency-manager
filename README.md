@@ -26,7 +26,7 @@ npm-dependency-manager helps you inspect npm dependencies without leaving VS Cod
 - Adds OSV vulnerability results plus CVE-linked EPSS and CISA KEV signals when available.
 - Shows deprecated package messages from npm registry metadata.
 - Opens a polished package detail page with npm metadata, weekly downloads, links, security information, lockfile context, dependencies, and rendered README content.
-- Falls back to GitHub README files when the npm registry does not publish useful README content.
+- Falls back to GitHub README files when the npm registry does not publish useful README content, including when GitHub repositories use common HTTPS, SSH, or hosted shorthand URL formats.
 - Opens README external links through VS Code.
 - Includes cache controls and explicit refresh actions for registry, audit, README, dependency, and download data.
 

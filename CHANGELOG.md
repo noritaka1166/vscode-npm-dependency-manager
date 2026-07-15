@@ -1,9 +1,11 @@
 # Change Log
 
-## Unreleased
+## 0.0.6
 
 - Added automatic npm, pnpm, Yarn, and Bun detection from the `packageManager` field and common lockfiles.
 - Updated dependency update actions and install-command hints to use the detected package manager.
+- Improved repository links and GitHub README fallbacks by normalizing common repository URL formats, including HTTPS, SSH, and hosted shorthand URLs.
+- Hardened audit input handling for dependency names such as `constructor` and `__proto__`.
 
 ## 0.0.5
 
