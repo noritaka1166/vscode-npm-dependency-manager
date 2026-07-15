@@ -86,6 +86,7 @@
   function renderList() {
     const counts = state.dependencyCounts || { dependencies: 0, devDependencies: 0 };
     const visibleDependencies = getVisibleDependencies();
+    const dependencyContent = renderDependencyContent(visibleDependencies);
 
     app.innerHTML = `
       <section class="dashboardHeader">
@@ -166,7 +167,7 @@
           ${renderColumnPicker()}
         </div>
         <div id="dependencyTable">
-          ${state.isLoading ? renderInlineLoading(state.message) : (state.message ? `<p class="empty">${escapeHtml(state.message)}</p>` : renderDependencyTable(visibleDependencies))}
+          ${dependencyContent}
         </div>
       </section>
     `;
@@ -242,6 +243,16 @@
     bindColumnResizers();
   }
 
+  function renderDependencyContent(visibleDependencies) {
+    if (state.isLoading) {
+      return renderInlineLoading(state.message);
+    }
+    if (state.message) {
+      return `<p class="empty">${escapeHtml(state.message)}</p>`;
+    }
+    return renderDependencyTable(visibleDependencies);
+  }
+
   function updateDependencyTable() {
     const dependencyTable = document.getElementById('dependencyTable');
     if (!dependencyTable) {
@@ -254,16 +265,24 @@
   }
 
   function bindColumnPicker() {
-    document.querySelectorAll('[data-column-toggle]').forEach((checkbox) => {
-      checkbox.addEventListener('change', () => {
-        const selected = [...document.querySelectorAll('[data-column-toggle]:checked')].map((input) => input.dataset.columnToggle);
-        state.visibleColumns = normalizeVisibleColumns(selected);
-        persistViewState();
-        vscode.postMessage({ type: 'setVisibleColumns', columns: state.visibleColumns });
-        updateDependencyTable();
-        updateColumnSummary();
-      });
-    });
+    document.querySelectorAll('[data-column-toggle]').forEach(bindColumnToggle);
+  }
+
+  function bindColumnToggle(checkbox) {
+    checkbox.addEventListener('change', handleColumnToggleChange);
+  }
+
+  function handleColumnToggleChange() {
+    const selected = [...document.querySelectorAll('[data-column-toggle]:checked')].map(getColumnToggleKey);
+    state.visibleColumns = normalizeVisibleColumns(selected);
+    persistViewState();
+    vscode.postMessage({ type: 'setVisibleColumns', columns: state.visibleColumns });
+    updateDependencyTable();
+    updateColumnSummary();
+  }
+
+  function getColumnToggleKey(input) {
+    return input.dataset.columnToggle;
   }
 
   function bindPackageButtons() {
@@ -446,7 +465,7 @@
   }
 
   function getColumnWidth(columnKey) {
-    return clampColumnWidth(columnKey, state.columnWidths && state.columnWidths[columnKey]);
+    return clampColumnWidth(columnKey, state.columnWidths?.[columnKey]);
   }
 
   function clampColumnWidth(columnKey, value) {
@@ -478,37 +497,42 @@
   }
 
   function bindColumnResizers() {
-    document.querySelectorAll('[data-column-resize]').forEach((handle) => {
-      handle.addEventListener('pointerdown', (event) => {
-        event.preventDefault();
-        const columnKey = handle.dataset.columnResize;
-        const startX = event.clientX;
-        const startWidth = getColumnWidth(columnKey);
-        handle.setPointerCapture(event.pointerId);
-        document.body.classList.add('resizingColumns');
+    document.querySelectorAll('[data-column-resize]').forEach(bindColumnResizer);
+  }
 
-        const onPointerMove = (moveEvent) => {
-          state.columnWidths = normalizeColumnWidths({
-            ...state.columnWidths,
-            [columnKey]: startWidth + moveEvent.clientX - startX
-          });
-          applyColumnWidths();
-        };
+  function bindColumnResizer(handle) {
+    handle.addEventListener('pointerdown', startColumnResize);
+  }
 
-        const onPointerUp = () => {
-          handle.removeEventListener('pointermove', onPointerMove);
-          handle.removeEventListener('pointerup', onPointerUp);
-          handle.removeEventListener('pointercancel', onPointerUp);
-          document.body.classList.remove('resizingColumns');
-          persistViewState();
-          vscode.postMessage({ type: 'setColumnWidths', widths: state.columnWidths });
-        };
+  function startColumnResize(event) {
+    event.preventDefault();
+    const handle = event.currentTarget;
+    const columnKey = handle.dataset.columnResize;
+    const startX = event.clientX;
+    const startWidth = getColumnWidth(columnKey);
+    handle.setPointerCapture(event.pointerId);
+    document.body.classList.add('resizingColumns');
 
-        handle.addEventListener('pointermove', onPointerMove);
-        handle.addEventListener('pointerup', onPointerUp);
-        handle.addEventListener('pointercancel', onPointerUp);
+    const onPointerMove = (moveEvent) => {
+      state.columnWidths = normalizeColumnWidths({
+        ...state.columnWidths,
+        [columnKey]: startWidth + moveEvent.clientX - startX
       });
-    });
+      applyColumnWidths();
+    };
+
+    const onPointerUp = () => {
+      handle.removeEventListener('pointermove', onPointerMove);
+      handle.removeEventListener('pointerup', onPointerUp);
+      handle.removeEventListener('pointercancel', onPointerUp);
+      document.body.classList.remove('resizingColumns');
+      persistViewState();
+      vscode.postMessage({ type: 'setColumnWidths', widths: state.columnWidths });
+    };
+
+    handle.addEventListener('pointermove', onPointerMove);
+    handle.addEventListener('pointerup', onPointerUp);
+    handle.addEventListener('pointercancel', onPointerUp);
   }
 
   function persistViewState() {
@@ -647,6 +671,7 @@
         return url.href;
       }
     } catch (error) {
+      reportWebviewFallback('Ignored an invalid external URL', error);
       return '';
     }
     return '';
@@ -708,52 +733,23 @@
     });
   }
 
-  function renderCacheSummary(cacheStats) {
-    const stats = cacheStats || {};
-    const total = ['registry', 'dependencies', 'audit', 'osv', 'epss', 'readme', 'downloads'].reduce((sum, key) => {
-      return sum + (Number.isFinite(stats[key]) ? stats[key] : 0);
-    }, 0);
-
-    return `<div class="cacheSummary"><span>cache</span><strong>${formatNumber(total)} entries</strong><small>registry ${formatNumber(stats.registry || 0)} / audit ${formatNumber(stats.audit || 0)} / OSV ${formatNumber(stats.osv || 0)} / EPSS ${formatNumber(stats.epss || 0)}</small></div>`;
-  }
-
   function renderCompactStatus(packageManager, lockInfo, cacheStats) {
     const stats = cacheStats || {};
     const cacheTotal = ['registry', 'dependencies', 'audit', 'osv', 'epss', 'readme', 'downloads'].reduce((sum, key) => {
       return sum + (Number.isFinite(stats[key]) ? stats[key] : 0);
     }, 0);
     const managerLabel = formatPackageManager(packageManager);
-    const lockLabel = lockInfo && lockInfo.exists ? (lockInfo.label || packageManager?.lockfile || 'lockfile') : 'no lock';
+    const lockLabel = lockInfo?.exists ? (lockInfo.label || packageManager?.lockfile || 'lockfile') : 'no lock';
     return `${escapeHtml(managerLabel)} / ${escapeHtml(lockLabel)} / cache ${formatNumber(cacheTotal)}`;
-  }
-
-  function renderLockSummary(lockInfo) {
-    if (!lockInfo) {
-      return '';
-    }
-    if (lockInfo.error) {
-      return `<div class="lockSummary warning"><span>${escapeHtml(formatPackageManager(lockInfo.packageManager))}</span><strong>Could not read lockfile</strong><small>${escapeHtml(lockInfo.error)}</small></div>`;
-    }
-    if (!lockInfo.exists) {
-      return `<div class="lockSummary warning"><span>${escapeHtml(formatPackageManager(lockInfo.packageManager))}</span><strong>Lockfile not found</strong><small>Resolved versions and vulnerability checks may be less accurate.</small></div>`;
-    }
-
-    const version = lockInfo.lockfileVersion ? `v${escapeHtml(lockInfo.lockfileVersion)}` : 'version unknown';
-    const parseNote = lockInfo.packageManager?.id === 'npm' ? `${formatNumber(lockInfo.packageCount)} locked packages` : 'Lockfile detected; detailed parsing is currently available for npm only.';
-    return `
-      <div class="lockSummary">
-        <span>${escapeHtml(formatPackageManager(lockInfo.packageManager))}</span>
-        <strong>${escapeHtml(lockInfo.label || lockInfo.packageManager?.lockfile || 'lockfile')}</strong>
-        <small>${version} &middot; ${parseNote}</small>
-      </div>
-    `;
   }
 
   function formatPackageManager(packageManager) {
     if (!packageManager) {
       return 'npm';
     }
-    return `${packageManager.label || packageManager.id || 'npm'}${packageManager.version ? ` ${packageManager.version}` : ''}`;
+    const name = packageManager.label || packageManager.id || 'npm';
+    const version = packageManager.version ? ` ${packageManager.version}` : '';
+    return `${name}${version}`;
   }
 
   function renderPackageManager(packageManager) {
@@ -791,7 +787,7 @@
     if (hasKev(dependency)) {
       badges.push(`<span class="badge kev">KEV</span>`);
     }
-    if (dependency.securitySignals && dependency.securitySignals.maxEpss && Number.isFinite(dependency.securitySignals.maxEpss.epss)) {
+    if (Number.isFinite(dependency.securitySignals?.maxEpss?.epss)) {
       badges.push(`<span class="badge epss">EPSS ${formatPercent(dependency.securitySignals.maxEpss.epss)}</span>`);
     }
     if (dependency.transitiveVulnerabilityCount) {
@@ -808,7 +804,7 @@
   }
 
   function hasKev(dependency) {
-    return Boolean(dependency.securitySignals && dependency.securitySignals.kev && dependency.securitySignals.kev.length);
+    return Boolean(dependency.securitySignals?.kev?.length);
   }
 
   function renderLockBadge(dependency) {
@@ -832,7 +828,15 @@
     if (detail.lockPeer) {
       flags.push('peer');
     }
-    return flags.length ? `<div><dt>Flags</dt><dd>${flags.map((flag) => `<span class="lockFlag">${escapeHtml(flag)}</span>`).join('')}</dd></div>` : '';
+    if (!flags.length) {
+      return '';
+    }
+    const flagBadges = flags.map(renderLockFlag).join('');
+    return `<div><dt>Flags</dt><dd>${flagBadges}</dd></div>`;
+  }
+
+  function renderLockFlag(flag) {
+    return `<span class="lockFlag">${escapeHtml(flag)}</span>`;
   }
 
   function renderDependencyTreeContext(detail) {
@@ -840,44 +844,99 @@
       return '';
     }
 
+    const facts = [];
+    if (detail.dependencyPath) {
+      facts.push(renderFact('Path', escapeHtml(detail.dependencyPath)));
+    }
+    if (detail.parentName) {
+      facts.push(renderFact('Required by', escapeHtml(`${detail.parentName}@${detail.parentVersion || '-'}`)));
+    }
+    if (detail.currentVersion) {
+      facts.push(renderFact('Requested range', escapeHtml(detail.currentVersion)));
+    }
+    if (detail.resolvedFromVersion) {
+      facts.push(renderFact('Parent manifest', escapeHtml(detail.resolvedFromVersion)));
+    }
+    if (Number.isFinite(detail.dependencyDepth)) {
+      facts.push(renderFact('Depth', formatNumber(detail.dependencyDepth)));
+    }
+
     return `
       <section class="sideSection">
         <h2>Dependency Tree</h2>
         <dl class="facts">
-          ${detail.dependencyPath ? `<div><dt>Path</dt><dd>${escapeHtml(detail.dependencyPath)}</dd></div>` : ''}
-          ${detail.parentName ? `<div><dt>Required by</dt><dd>${escapeHtml(`${detail.parentName}@${detail.parentVersion || '-'}`)}</dd></div>` : ''}
-          ${detail.currentVersion ? `<div><dt>Requested range</dt><dd>${escapeHtml(detail.currentVersion)}</dd></div>` : ''}
-          ${detail.resolvedFromVersion ? `<div><dt>Parent manifest</dt><dd>${escapeHtml(detail.resolvedFromVersion)}</dd></div>` : ''}
-          ${Number.isFinite(detail.dependencyDepth) ? `<div><dt>Depth</dt><dd>${formatNumber(detail.dependencyDepth)}</dd></div>` : ''}
+          ${facts.join('')}
         </dl>
       </section>
     `;
+  }
+
+  function renderFact(label, value) {
+    return `<div><dt>${escapeHtml(label)}</dt><dd>${value}</dd></div>`;
   }
 
   function renderNpmMetadata(detail) {
     const distTags = Object.entries(detail.distTags || {});
     const maintainers = detail.maintainers || [];
     const keywords = detail.keywords || [];
+    const facts = [];
+
+    addTextFact(facts, 'Publisher', detail.publisher);
+    addTextFact(facts, 'Author', detail.author);
+    if (maintainers.length) {
+      facts.push(renderFact('Maintainers', renderLimitedChips(maintainers, 6)));
+    }
+    if (detail.createdAt) {
+      facts.push(renderFact('Created', renderDate(detail.createdAt)));
+    }
+    if (detail.modifiedAt) {
+      facts.push(renderFact('Modified', renderDate(detail.modifiedAt)));
+    }
+    if (Number.isFinite(detail.versionCount)) {
+      facts.push(renderFact('Versions', formatNumber(detail.versionCount)));
+    }
+    if (distTags.length) {
+      facts.push(renderFact('Dist tags', distTags.map(renderDistTag).join('')));
+    }
+    if (keywords.length) {
+      facts.push(renderFact('Keywords', renderLimitedChips(keywords, 12)));
+    }
 
     return `
       <section class="sideSection npmMetadata">
         <h2>npm Metadata</h2>
         <dl class="facts">
-          ${detail.publisher ? `<div><dt>Publisher</dt><dd>${escapeHtml(detail.publisher)}</dd></div>` : ''}
-          ${detail.author ? `<div><dt>Author</dt><dd>${escapeHtml(detail.author)}</dd></div>` : ''}
-          ${maintainers.length ? `<div><dt>Maintainers</dt><dd>${maintainers.slice(0, 6).map((person) => `<span class="metadataChip">${escapeHtml(person)}</span>`).join('')}${maintainers.length > 6 ? `<small>+${maintainers.length - 6} more</small>` : ''}</dd></div>` : ''}
-          ${detail.createdAt ? `<div><dt>Created</dt><dd>${renderDate(detail.createdAt)}</dd></div>` : ''}
-          ${detail.modifiedAt ? `<div><dt>Modified</dt><dd>${renderDate(detail.modifiedAt)}</dd></div>` : ''}
-          ${Number.isFinite(detail.versionCount) ? `<div><dt>Versions</dt><dd>${formatNumber(detail.versionCount)}</dd></div>` : ''}
-          ${distTags.length ? `<div><dt>Dist tags</dt><dd>${distTags.map(([tag, version]) => `<span class="metadataChip tag"><strong>${escapeHtml(tag)}</strong> ${escapeHtml(version)}</span>`).join('')}</dd></div>` : ''}
-          ${keywords.length ? `<div><dt>Keywords</dt><dd>${keywords.slice(0, 12).map((keyword) => `<span class="metadataChip">${escapeHtml(keyword)}</span>`).join('')}${keywords.length > 12 ? `<small>+${keywords.length - 12} more</small>` : ''}</dd></div>` : ''}
+          ${facts.join('')}
         </dl>
       </section>
     `;
   }
 
+  function addTextFact(facts, label, value) {
+    if (value) {
+      facts.push(renderFact(label, escapeHtml(value)));
+    }
+  }
+
+  function renderLimitedChips(values, limit) {
+    const chips = values.slice(0, limit).map(renderMetadataChip).join('');
+    const remainder = values.length - limit;
+    return remainder > 0 ? `${chips}<small>+${remainder} more</small>` : chips;
+  }
+
+  function renderMetadataChip(value) {
+    return `<span class="metadataChip">${escapeHtml(value)}</span>`;
+  }
+
+  function renderDistTag([tag, version]) {
+    return `<span class="metadataChip tag"><strong>${escapeHtml(tag)}</strong> ${escapeHtml(version)}</span>`;
+  }
+
   function renderUpdate(dependency) {
-    const type = dependency.updateType || (dependency.status === 'update' ? 'unknown' : 'current');
+    let type = dependency.updateType;
+    if (!type) {
+      type = dependency.status === 'update' ? 'unknown' : 'current';
+    }
     const label = dependency.updateLabel || type;
     return `<span class="updateBadge ${escapeAttr(type)}">${escapeHtml(label)}</span>`;
   }
@@ -924,8 +983,7 @@
 
   function canUpdateDependency(dependency) {
     return Boolean(
-      dependency &&
-      dependency.name &&
+      dependency?.name &&
       dependency.latestVersion &&
       !dependency.parentName &&
       !dependency.dependencyDepth &&
@@ -957,6 +1015,7 @@
       const url = new URL(value);
       return `${url.host}${url.pathname}`;
     } catch (error) {
+      reportWebviewFallback('Displayed an invalid metadata URL as-is', error);
       return value;
     }
   }
@@ -971,50 +1030,38 @@
       return '<section class="sideSection security okPanel"><h2>Security</h2><p>No deprecation or known vulnerability signals found for the resolved version.</p></section>';
     }
 
+    const content = [
+      renderSecuritySignals(securitySignals),
+      renderDeprecatedNotice(detail),
+      renderUnknownAuditNotice(detail),
+      renderAdvisoryGroup('npm audit advisories', vulnerabilities, 'npm'),
+      renderAdvisoryGroup('OSV vulnerabilities', osvVulnerabilities, 'osv'),
+      renderAdvisoryGroup('Transitive vulnerabilities', transitiveVulnerabilities, 'transitiveNpm'),
+      renderAdvisoryGroup('Transitive OSV vulnerabilities', transitiveOsvVulnerabilities, 'osv', true)
+    ].join('');
+
     return `
       <section class="sideSection security">
         <h2>Security</h2>
-        ${renderSecuritySignals(securitySignals)}
-        ${detail.deprecated ? `<div class="notice deprecatedNotice"><strong>Deprecated</strong><p>${escapeHtml(detail.deprecatedMessage || 'This package version is deprecated.')}</p></div>` : ''}
-        ${detail.auditStatus === 'unknown' ? `<div class="notice unknownNotice"><strong>Vulnerabilities not checked</strong><p>${escapeHtml(detail.auditError || 'A resolved version was not available. Add or update package-lock.json for more accurate audit results.')}</p></div>` : ''}
-        ${vulnerabilities.length ? `
-          <div class="advisories">
-            <h3>npm audit advisories</h3>
-            ${vulnerabilities.map((advisory) => `
-              <article class="advisory ${escapeAttr(advisory.severity || 'unknown')}">
-                <div>
-                  <strong>${escapeHtml(advisory.title)}</strong>
-                  <span>${escapeHtml(advisory.severity || 'unknown')}</span>
-                </div>
-                ${advisory.vulnerableVersions ? `<p>Vulnerable: ${escapeHtml(advisory.vulnerableVersions)}</p>` : ''}
-                ${advisory.patchedVersions ? `<p>Patched: ${escapeHtml(advisory.patchedVersions)}</p>` : ''}
-                ${advisory.url ? `<a href="${escapeAttr(advisory.url)}">Advisory</a>` : ''}
-              </article>
-            `).join('')}
-          </div>
-        ` : ''}
-        ${osvVulnerabilities.length ? renderAdvisoryGroup('OSV vulnerabilities', osvVulnerabilities) : ''}
-        ${transitiveVulnerabilities.length ? `
-          <div class="advisories">
-            <h3>Transitive vulnerabilities</h3>
-            ${transitiveVulnerabilities.map((advisory) => `
-              <article class="advisory transitiveAdvisory ${escapeAttr(advisory.severity || 'unknown')}">
-                <div>
-                  <strong>${escapeHtml(advisory.packageName || 'dependency')}@${escapeHtml(advisory.packageVersion || '-')}</strong>
-                  <span>${escapeHtml(advisory.severity || 'unknown')}</span>
-                </div>
-                <p>${escapeHtml(advisory.title)}</p>
-                ${advisory.vulnerableVersions ? `<p>Vulnerable: ${escapeHtml(advisory.vulnerableVersions)}</p>` : ''}
-                ${advisory.patchedVersions ? `<p>Patched: ${escapeHtml(advisory.patchedVersions)}</p>` : ''}
-                ${advisory.packagePath ? `<p>Path: ${escapeHtml(advisory.packagePath)}</p>` : ''}
-                ${advisory.url ? `<a href="${escapeAttr(advisory.url)}">Advisory</a>` : ''}
-              </article>
-            `).join('')}
-          </div>
-        ` : ''}
-        ${transitiveOsvVulnerabilities.length ? renderAdvisoryGroup('Transitive OSV vulnerabilities', transitiveOsvVulnerabilities, true) : ''}
+        ${content}
       </section>
     `;
+  }
+
+  function renderDeprecatedNotice(detail) {
+    if (!detail.deprecated) {
+      return '';
+    }
+    const message = detail.deprecatedMessage || 'This package version is deprecated.';
+    return `<div class="notice deprecatedNotice"><strong>Deprecated</strong><p>${escapeHtml(message)}</p></div>`;
+  }
+
+  function renderUnknownAuditNotice(detail) {
+    if (detail.auditStatus !== 'unknown') {
+      return '';
+    }
+    const message = detail.auditError || 'A resolved version was not available. Add or update package-lock.json for more accurate audit results.';
+    return `<div class="notice unknownNotice"><strong>Vulnerabilities not checked</strong><p>${escapeHtml(message)}</p></div>`;
   }
 
   function renderSecuritySignals(signals) {
@@ -1025,51 +1072,129 @@
       return '';
     }
 
+    const content = [
+      renderCveSignals(cves),
+      renderKevSummary(kev),
+      renderEpssSummary(epss),
+      kev.slice(0, 3).map(renderKevDetail).join('')
+    ].join('');
+
     return `
       <div class="signalPanel">
         <strong>Risk intelligence</strong>
-        ${cves.length ? `<p>CVEs: ${cves.slice(0, 6).map((cve) => `<span class="metadataChip">${escapeHtml(cve)}</span>`).join('')}${cves.length > 6 ? `<small>+${cves.length - 6} more</small>` : ''}</p>` : ''}
-        ${kev.length ? `<p><span class="badge kev">KEV</span> ${formatNumber(kev.length)} CVE${kev.length === 1 ? '' : 's'} listed in CISA Known Exploited Vulnerabilities.</p>` : ''}
-        ${epss.length ? `<p>Highest EPSS: <strong>${formatPercent(epss[0].epss)}</strong>${Number.isFinite(epss[0].percentile) ? ` (${Math.round(epss[0].percentile * 100)}th percentile)` : ''}</p>` : ''}
-        ${kev.length ? kev.slice(0, 3).map((entry) => `<p class="signalDetail">${escapeHtml(entry.cve)}: ${escapeHtml(entry.vulnerabilityName || `${entry.vendorProject} ${entry.product}`)}${entry.dateAdded ? ` · added ${escapeHtml(entry.dateAdded)}` : ''}</p>`).join('') : ''}
+        ${content}
       </div>
     `;
   }
 
-  function renderAdvisoryGroup(title, advisories, transitive = false) {
+  function renderCveSignals(cves) {
+    if (!cves.length) {
+      return '';
+    }
+    return `<p>CVEs: ${renderLimitedChips(cves, 6)}</p>`;
+  }
+
+  function renderKevSummary(kev) {
+    if (!kev.length) {
+      return '';
+    }
+    const suffix = kev.length === 1 ? '' : 's';
+    return `<p><span class="badge kev">KEV</span> ${formatNumber(kev.length)} CVE${suffix} listed in CISA Known Exploited Vulnerabilities.</p>`;
+  }
+
+  function renderEpssSummary(epss) {
+    if (!epss.length) {
+      return '';
+    }
+    const percentile = Number.isFinite(epss[0].percentile) ? ` (${Math.round(epss[0].percentile * 100)}th percentile)` : '';
+    return `<p>Highest EPSS: <strong>${formatPercent(epss[0].epss)}</strong>${percentile}</p>`;
+  }
+
+  function renderKevDetail(entry) {
+    const name = entry.vulnerabilityName || `${entry.vendorProject} ${entry.product}`;
+    const date = entry.dateAdded ? ` · added ${escapeHtml(entry.dateAdded)}` : '';
+    return `<p class="signalDetail">${escapeHtml(entry.cve)}: ${escapeHtml(name)}${date}</p>`;
+  }
+
+  function renderAdvisoryGroup(title, advisories, kind, transitive = false) {
+    if (!advisories.length) {
+      return '';
+    }
+    const articles = advisories.map((advisory) => renderAdvisory(advisory, kind, transitive)).join('');
     return `
       <div class="advisories">
         <h3>${escapeHtml(title)}</h3>
-        ${advisories.map((advisory) => `
-          <article class="advisory ${transitive ? 'transitiveAdvisory' : ''} ${escapeAttr(advisory.severity || 'unknown')}">
-            <div>
-              <strong>${escapeHtml(advisory.packageName ? `${advisory.packageName}@${advisory.packageVersion || '-'}` : advisory.title)}</strong>
-              <span>${escapeHtml(advisory.severity || 'unknown')}</span>
-            </div>
-            ${advisory.packageName ? `<p>${escapeHtml(advisory.title)}</p>` : ''}
-            ${advisory.id ? `<p>ID: ${escapeHtml(advisory.id)}</p>` : ''}
-            ${advisory.cves && advisory.cves.length ? `<p>CVEs: ${advisory.cves.map((cve) => `<span class="metadataChip">${escapeHtml(cve)}</span>`).join('')}</p>` : ''}
-            ${advisory.vulnerableVersions ? `<p>Vulnerable: ${escapeHtml(advisory.vulnerableVersions)}</p>` : ''}
-            ${advisory.patchedVersions ? `<p>Patched: ${escapeHtml(advisory.patchedVersions)}</p>` : ''}
-            ${advisory.packagePath ? `<p>Path: ${escapeHtml(advisory.packagePath)}</p>` : ''}
-            ${advisory.url ? `<a href="${escapeAttr(advisory.url)}">Advisory</a>` : ''}
-          </article>
-        `).join('')}
+        ${articles}
       </div>
     `;
+  }
+
+  function renderAdvisory(advisory, kind, transitive) {
+    const className = transitive || kind === 'transitiveNpm' ? 'transitiveAdvisory' : '';
+    const heading = getAdvisoryHeading(advisory, kind);
+    const details = renderAdvisoryDetails(advisory, kind);
+    return `
+      <article class="advisory ${className} ${escapeAttr(advisory.severity || 'unknown')}">
+        <div>
+          <strong>${escapeHtml(heading)}</strong>
+          <span>${escapeHtml(advisory.severity || 'unknown')}</span>
+        </div>
+        ${details}
+      </article>
+    `;
+  }
+
+  function getAdvisoryHeading(advisory, kind) {
+    if (kind === 'transitiveNpm' || advisory.packageName) {
+      return `${advisory.packageName || 'dependency'}@${advisory.packageVersion || '-'}`;
+    }
+    return advisory.title;
+  }
+
+  function renderAdvisoryDetails(advisory, kind) {
+    const details = [];
+    if (kind === 'transitiveNpm' || (kind === 'osv' && advisory.packageName)) {
+      details.push(`<p>${escapeHtml(advisory.title)}</p>`);
+    }
+    if (kind === 'osv' && advisory.id) {
+      details.push(`<p>ID: ${escapeHtml(advisory.id)}</p>`);
+    }
+    if (kind === 'osv' && advisory.cves?.length) {
+      details.push(`<p>CVEs: ${advisory.cves.map(renderMetadataChip).join('')}</p>`);
+    }
+    addAdvisoryDetail(details, 'Vulnerable', advisory.vulnerableVersions);
+    addAdvisoryDetail(details, 'Patched', advisory.patchedVersions);
+    if (kind !== 'npm') {
+      addAdvisoryDetail(details, 'Path', advisory.packagePath);
+    }
+    if (advisory.url) {
+      details.push(`<a href="${escapeAttr(advisory.url)}">Advisory</a>`);
+    }
+    return details.join('');
+  }
+
+  function addAdvisoryDetail(details, label, value) {
+    if (value) {
+      details.push(`<p>${escapeHtml(label)}: ${escapeHtml(value)}</p>`);
+    }
   }
 
   function escapeHtml(value) {
     return String(value || '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
   }
 
   function escapeAttr(value) {
     return escapeHtml(value);
+  }
+
+  function reportWebviewFallback(context, error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[npm-dependency-manager] ${context}: ${message}`);
   }
 
   vscode.postMessage({ type: 'ready' });
