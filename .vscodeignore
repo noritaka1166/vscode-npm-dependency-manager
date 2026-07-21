@@ -2,6 +2,7 @@
 .vscode/**
 .agents/**
 .codex/**
+AGENTS.md
 .gitignore
 .vscodeignore
 outputs/**
@@ -10,4 +11,7 @@ work/**
 **/.DS_Store
 node_modules/@types/**
 node_modules/.bin/**
+node_modules/**/*.map
+node_modules/dompurify/**
+!node_modules/dompurify/dist/purify.min.js
 test/**

@@ -1,5 +1,12 @@
 # Change Log
 
+## 0.0.7
+
+- Strengthened README HTML sanitization in the package detail webview with DOMPurify.
+- Improved package detail reliability, including safer parsing and resilient handling of optional registry and README data.
+- Improved the package detail layout on desktop and narrow windows. README content and package metadata now scroll independently on wider screens.
+- Reduced the VSIX package size by excluding development-only source maps and unused DOMPurify builds.
+
 ## 0.0.6
 
 - Added automatic npm, pnpm, Yarn, and Bun detection from the `packageManager` field and common lockfiles.
