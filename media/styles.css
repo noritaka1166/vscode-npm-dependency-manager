@@ -764,6 +764,18 @@ small {
   margin: 0 auto;
 }
 
+@media (min-width: 821px) {
+  body:has(.detailPage) {
+    overflow: hidden;
+  }
+
+  .detailPage {
+    display: grid;
+    height: calc(100vh - 12px);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+}
+
 .packageHeader {
   position: sticky;
   top: 0;
@@ -827,6 +839,24 @@ small {
   padding-top: 16px;
 }
 
+@media (min-width: 821px) {
+  .packageHeader {
+    position: static;
+  }
+
+  .packageLayout {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .readmePanel,
+  .packageSidebar {
+    height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
+
 .readmePanel {
   min-width: 0;
   padding-bottom: 40px;
@@ -849,6 +879,13 @@ small {
   display: grid;
   gap: 14px;
   min-width: 0;
+}
+
+@media (min-width: 821px) {
+  .packageSidebar {
+    position: static;
+    padding-bottom: 40px;
+  }
 }
 
 .sideSection {
