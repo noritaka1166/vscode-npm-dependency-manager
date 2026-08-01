@@ -46,6 +46,19 @@ Some README fallbacks are loaded from repository URLs such as `https://raw.githu
 
 Vulnerability and dependency tree results are most accurate when a `package-lock.json` exists next to the selected `package.json`.
 
+## Privacy and network access
+
+This extension does not include telemetry or analytics. It does not upload workspace source code, `.npmrc` files, environment variables, authentication tokens, or other credentials.
+
+To provide current package and security information, it makes requests only to the public services listed above. Depending on the feature you use, these requests can include:
+
+- Package names to the npm registry and npm downloads API.
+- Package names and resolved versions from the selected project's `package.json` and `package-lock.json` to npm audit and OSV vulnerability APIs. This can include direct and transitive dependencies.
+- CVE identifiers returned by vulnerability services to the FIRST EPSS API, and a request for CISA's public KEV catalog.
+- A request for a public repository README from `raw.githubusercontent.com` when the npm registry does not provide useful README content.
+
+No account, API key, or sign-in is required. The extension does not send your workspace source files or credentials to these services.
+
 ## Usage
 
 1. Open a Node.js workspace in VS Code.

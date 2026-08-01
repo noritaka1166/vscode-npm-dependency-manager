@@ -46,6 +46,19 @@ npm registry が README filename や placeholder text しか公開していな�
 
 脆弱性や dependency tree の結果は、選択中の `package.json` の隣に `package-lock.json` がある場合により正確になります。
 
+## プライバシーとネットワーク通信
+
+この拡張機能には、telemetry や analytics は含まれていません。ワークスペースの source code、`.npmrc`、environment variable、authentication token、その他の credential をアップロードすることはありません。
+
+最新の package・security 情報を表示するために、上記の公開サービスだけにリクエストを送信します。利用する機能によって、次の情報が含まれる場合があります。
+
+- npm registry と npm downloads API には、package name を送信します。
+- npm audit と OSV vulnerability API には、選択中の project の `package.json` と `package-lock.json` にある package name と resolved version を送信します。direct dependency と transitive dependency の両方が対象になる場合があります。
+- vulnerability service が返す CVE identifier を FIRST EPSS API に送信し、CISA の公開 KEV catalog を取得します。
+- npm registry に有用な README がない場合、`raw.githubusercontent.com` にある公開 repository の README を取得します。
+
+account、API key、sign-in は不要です。これらのサービスに、ワークスペースの source file や credential を送信することはありません。
+
 ## 使い方
 
 1. VS Code で Node.js workspace を開きます。
