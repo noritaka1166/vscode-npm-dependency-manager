@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.0.8
+
+- Added SBOM export for the selected project in CycloneDX 1.5 JSON and SPDX 2.3 JSON formats, including the resolved npm dependency graph when `package-lock.json` is available.
+- Added CSV dependency-report export for all direct dependencies or the current search and filter results, with version, license, update, lockfile, and vulnerability information.
+- Added dashboard actions and commands for exporting SBOMs and CSV dependency reports.
+
 ## 0.0.7
 
 - Strengthened README HTML sanitization in the package detail webview with DOMPurify.
