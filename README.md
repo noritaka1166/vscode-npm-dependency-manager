@@ -22,6 +22,7 @@ npm-dependency-manager helps you inspect npm dependencies without leaving VS Cod
 - Highlights major, minor, and patch update candidates.
 - Runs guarded update actions from the list or package detail page with a confirmation prompt.
 - Reads `package-lock.json` for resolved versions, lock paths, and dependency tree context.
+- Exports the selected project as a CycloneDX 1.5 JSON or SPDX 2.3 JSON SBOM. Both formats include the resolved npm dependency graph when `package-lock.json` is available.
 - Checks npm audit bulk advisories for direct and transitive vulnerabilities when a resolved version is available.
 - Adds OSV vulnerability results plus CVE-linked EPSS and CISA KEV signals when available.
 - Shows deprecated package messages from npm registry metadata.
@@ -53,17 +54,20 @@ Vulnerability and dependency tree results are most accurate when a `package-lock
 5. Select a package to open the package detail page.
 6. Adjust visible columns or resize column widths when you want a denser or simpler table.
 7. Expand packages in the sidebar to inspect transitive dependencies.
+8. Select **Export SBOM** in the dashboard, or run the export command, then choose CycloneDX or SPDX JSON.
 
 ## Commands
 
 - `npm Packages: Show Dashboard`
 - `npm Packages: Refresh`
+- `npm Packages: Export SBOM` (CycloneDX JSON or SPDX JSON)
 - `npm Packages: Open Package`
 
 ## Known Limitations
 
 - npm audit and OSV checks require a resolved package version. Add or update `package-lock.json` for packages that show `Vulnerabilities not checked`.
 - Per-package lockfile parsing, resolved versions, and dependency tree context currently support `package-lock.json`. pnpm, Yarn, and Bun lockfiles are detected and used for update-command selection.
+- SBOM dependency-graph export currently parses `package-lock.json`. Without it, the SBOM contains the direct dependencies from `package.json` as unresolved components.
 - Transitive vulnerability attribution depends on the dependency graph recorded in `package-lock.json`.
 - EPSS and KEV signals are shown only for advisories that expose CVE identifiers.
 - README rendering supports common npm/GitHub Markdown, but unusual HTML or repository asset layouts may not render exactly like npmjs.com.

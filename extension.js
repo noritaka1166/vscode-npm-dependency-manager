@@ -5,6 +5,7 @@ const MarkdownIt = require('markdown-it');
 const { SecurityService } = require('./lib/security');
 const { normalizeRepositoryUrl } = require('./lib/repository');
 const { PACKAGE_MANAGERS, createPackageInstallCommand, detectPackageManager } = require('./lib/package-manager');
+const { createCycloneDxSbom, createSpdxSbom } = require('./lib/sbom');
 
 const VIEW_ID = 'workspaceNpmSidebar.dependenciesView';
 const PANEL_TYPE = 'workspaceNpmSidebar.dashboard';
@@ -43,6 +44,9 @@ function activate(context) {
       await model.refreshFromNetwork();
       panel.show();
     }),
+    vscode.commands.registerCommand('workspaceNpmSidebar.exportSbom', async () => {
+      await panel.exportSbom();
+    }),
     vscode.commands.registerCommand('workspaceNpmSidebar.openPackage', async (dependency) => {
       if (dependency?.name) {
         await panel.showPackage(dependency.name, dependency);
@@ -72,6 +76,7 @@ class NpmWorkspaceModel {
     const filters = normalizeFilterState(context?.workspaceState.get(FILTER_STATE_KEY));
     this.packageFiles = [];
     this.selectedPackageJson = undefined;
+    this.packageJson = undefined;
     this.filter = filters.filter;
     this.riskFilter = filters.riskFilter;
     this.updateFilter = filters.updateFilter;
@@ -105,6 +110,7 @@ class NpmWorkspaceModel {
 
     if (!this.packageFiles.length) {
       this.selectedPackageJson = undefined;
+      this.packageJson = undefined;
       this.dependencies = [];
       this.allDependencies = [];
       this.isLoading = false;
@@ -230,6 +236,7 @@ class NpmWorkspaceModel {
     this.emit();
 
     const packageJson = await readPackageJson(this.selectedPackageJson);
+    this.packageJson = packageJson;
     this.lockInfo = await readLockInfo(this.selectedPackageJson, packageJson);
     this.packageManager = this.lockInfo.packageManager;
     this.dependencyCounts = getDependencyCounts(packageJson);
@@ -245,6 +252,24 @@ class NpmWorkspaceModel {
     this.message = '';
     this.applyDependencyView(false);
     this.emit();
+  }
+
+  createSbom(format = 'cyclonedx') {
+    if (!this.selectedPackageJson || !this.packageJson) {
+      throw new Error('Select a package.json before exporting an SBOM.');
+    }
+
+    const input = {
+      packageJson: this.packageJson,
+      packageJsonPath: this.selectedPackageJson,
+      lockInfo: this.lockInfo,
+      toolVersion: this.context?.extension?.packageJSON?.version || ''
+    };
+
+    if (format === 'spdx') {
+      return createSpdxSbom(input);
+    }
+    return createCycloneDxSbom(input);
   }
 
   applyDependencyView(emit = true, reason = 'state') {
@@ -738,6 +763,9 @@ class DashboardPanel {
           case 'refreshAll':
             await this.model.refreshFromNetwork();
             break;
+          case 'exportSbom':
+            await this.exportSbom();
+            break;
           case 'refreshPackage':
             await this.refreshPackage(message.name);
             break;
@@ -802,6 +830,36 @@ class DashboardPanel {
     });
     terminal.show();
     terminal.sendText(command.command, true);
+  }
+
+  async exportSbom() {
+    const selectedFormat = await vscode.window.showQuickPick([
+      { label: 'CycloneDX 1.5 JSON', format: 'cyclonedx', fileName: 'bom.json' },
+      { label: 'SPDX 2.3 JSON', format: 'spdx', fileName: 'sbom.spdx.json' }
+    ], {
+      title: 'Export SBOM',
+      placeHolder: 'Choose an SBOM format'
+    });
+
+    if (!selectedFormat) {
+      return;
+    }
+
+    const sbom = this.model.createSbom(selectedFormat.format);
+    const defaultUri = vscode.Uri.file(path.join(path.dirname(this.model.selectedPackageJson), selectedFormat.fileName));
+    const targetUri = await vscode.window.showSaveDialog({
+      title: `Export ${selectedFormat.label} SBOM`,
+      defaultUri,
+      filters: { [selectedFormat.label]: ['json'] }
+    });
+
+    if (!targetUri) {
+      return;
+    }
+
+    const contents = Buffer.from(`${JSON.stringify(sbom, null, 2)}\n`, 'utf8');
+    await vscode.workspace.fs.writeFile(targetUri, contents);
+    vscode.window.showInformationMessage(`${selectedFormat.label} SBOM exported to ${vscode.workspace.asRelativePath(targetUri, false)}.`);
   }
 
   update() {
@@ -998,6 +1056,7 @@ function normalizeLockPackage(name, info, packagePath) {
     peer: Boolean(info.peer),
     dependencies: info.dependencies || {},
     optionalDependencies: info.optionalDependencies || {},
+    peerDependencies: info.peerDependencies || {},
     depth: getLockPackageDepth(packagePath)
   };
 }

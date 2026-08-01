@@ -96,6 +96,7 @@
         </div>
         <div class="headerActions">
           <span class="headerMeta">${renderCompactStatus(state.packageManager, state.lockInfo, state.cacheStats)}</span>
+          <button id="exportSbomButton" class="secondaryButton" title="Save a CycloneDX or SPDX SBOM for the selected package.json">Export SBOM</button>
           <button id="refreshAllButton" class="secondaryButton" title="Clear cache and reload registry data">Refresh all</button>
         </div>
       </section>
@@ -183,6 +184,13 @@
     if (refreshAllButton) {
       refreshAllButton.addEventListener('click', () => {
         vscode.postMessage({ type: 'refreshAll' });
+      });
+    }
+
+    const exportSbomButton = document.getElementById('exportSbomButton');
+    if (exportSbomButton) {
+      exportSbomButton.addEventListener('click', () => {
+        vscode.postMessage({ type: 'exportSbom' });
       });
     }
 

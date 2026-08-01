@@ -22,6 +22,7 @@ npm-dependency-manager は、VS Code の中で npm dependencies を確認する�
 - major / minor / patch の更新候補を見やすく表示します。
 - 一覧または詳細画面から、確認ダイアログ付きで更新アクションを実行できます。
 - `package-lock.json` から resolved version、lock path、dependency tree context を読み取ります。
+- 選択中のプロジェクトを CycloneDX 1.5 JSON または SPDX 2.3 JSON 形式の SBOM として出力します。どちらも `package-lock.json` があれば、解決済みの npm dependency graph を含めます。
 - resolved version がある場合、npm audit bulk advisories を使って直接・推移的な脆弱性シグナルを確認します。
 - OSV vulnerability results と、CVE に紐づく EPSS / CISA KEV signal も表示します。
 - npm registry metadata から deprecated package message を表示します。
@@ -53,17 +54,20 @@ npm registry が README filename や placeholder text しか公開していな�
 5. パッケージを選択すると詳細画面が開きます。
 6. 必要に応じて表示カラムやカラム幅を調整します。
 7. サイドバーでパッケージを展開すると transitive dependencies を確認できます。
+8. ダッシュボードの **Export SBOM**、または export command から CycloneDX JSON / SPDX JSON を選んで保存できます。
 
 ## コマンド
 
 - `npm Packages: Show Dashboard`
 - `npm Packages: Refresh`
+- `npm Packages: Export SBOM`（CycloneDX JSON または SPDX JSON）
 - `npm Packages: Open Package`
 
 ## 既知の制限
 
 - npm audit / OSV checks には resolved package version が必要です。`Vulnerabilities not checked` と表示される場合は、`package-lock.json` を追加または更新してください。
 - lockfile の個別パッケージ解析、resolved version、dependency tree context は現在 `package-lock.json` に対応しています。pnpm / Yarn / Bun の lockfile は検出と更新コマンドの切り替えに対応しています。
+- SBOM の dependency graph 出力は現在 `package-lock.json` の解析に対応しています。lockfile がない場合は、`package.json` の直接依存を未解決 component として出力します。
 - transitive vulnerability の関連付けは、`package-lock.json` に記録されている dependency graph に依存します。
 - EPSS / KEV signals は、advisory に CVE identifier が含まれている場合のみ表示されます。
 - README rendering は一般的な npm / GitHub Markdown を想定していますが、特殊な HTML や repository asset layout は npmjs.com と完全に同じ表示にならない場合があります。
