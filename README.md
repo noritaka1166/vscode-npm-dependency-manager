@@ -23,6 +23,7 @@ npm-dependency-manager helps you inspect npm dependencies without leaving VS Cod
 - Runs guarded update actions from the list or package detail page with a confirmation prompt.
 - Reads `package-lock.json` for resolved versions, lock paths, and dependency tree context.
 - Exports the selected project as a CycloneDX 1.5 JSON or SPDX 2.3 JSON SBOM. Both formats include the resolved npm dependency graph when `package-lock.json` is available.
+- Exports a CSV dependency report for all direct dependencies or the current search and filter results. It includes versions, license, update, lockfile, and vulnerability information.
 - Checks npm audit bulk advisories for direct and transitive vulnerabilities when a resolved version is available.
 - Adds OSV vulnerability results plus CVE-linked EPSS and CISA KEV signals when available.
 - Shows deprecated package messages from npm registry metadata.
@@ -55,12 +56,14 @@ Vulnerability and dependency tree results are most accurate when a `package-lock
 6. Adjust visible columns or resize column widths when you want a denser or simpler table.
 7. Expand packages in the sidebar to inspect transitive dependencies.
 8. Select **Export SBOM** in the dashboard, or run the export command, then choose CycloneDX or SPDX JSON.
+9. Select **Export CSV** to save all direct dependencies or the current search and filter results as a spreadsheet-friendly report.
 
 ## Commands
 
 - `npm Packages: Show Dashboard`
 - `npm Packages: Refresh`
 - `npm Packages: Export SBOM` (CycloneDX JSON or SPDX JSON)
+- `npm Packages: Export Dependency Report CSV`
 - `npm Packages: Open Package`
 
 ## Known Limitations

@@ -6,6 +6,7 @@ const { SecurityService } = require('./lib/security');
 const { normalizeRepositoryUrl } = require('./lib/repository');
 const { PACKAGE_MANAGERS, createPackageInstallCommand, detectPackageManager } = require('./lib/package-manager');
 const { createCycloneDxSbom, createSpdxSbom } = require('./lib/sbom');
+const { createDependencyReportCsv } = require('./lib/dependency-report');
 
 const VIEW_ID = 'workspaceNpmSidebar.dependenciesView';
 const PANEL_TYPE = 'workspaceNpmSidebar.dashboard';
@@ -46,6 +47,9 @@ function activate(context) {
     }),
     vscode.commands.registerCommand('workspaceNpmSidebar.exportSbom', async () => {
       await panel.exportSbom();
+    }),
+    vscode.commands.registerCommand('workspaceNpmSidebar.exportCsv', async () => {
+      await panel.exportCsv();
     }),
     vscode.commands.registerCommand('workspaceNpmSidebar.openPackage', async (dependency) => {
       if (dependency?.name) {
@@ -270,6 +274,13 @@ class NpmWorkspaceModel {
       return createSpdxSbom(input);
     }
     return createCycloneDxSbom(input);
+  }
+
+  createDependencyReportCsv(scope = 'all') {
+    if (!this.selectedPackageJson || !this.packageJson) {
+      throw new Error('Select a package.json before exporting a dependency report.');
+    }
+    return createDependencyReportCsv(scope === 'filtered' ? this.dependencies : this.allDependencies);
   }
 
   applyDependencyView(emit = true, reason = 'state') {
@@ -766,6 +777,9 @@ class DashboardPanel {
           case 'exportSbom':
             await this.exportSbom();
             break;
+          case 'exportCsv':
+            await this.exportCsv();
+            break;
           case 'refreshPackage':
             await this.refreshPackage(message.name);
             break;
@@ -860,6 +874,35 @@ class DashboardPanel {
     const contents = Buffer.from(`${JSON.stringify(sbom, null, 2)}\n`, 'utf8');
     await vscode.workspace.fs.writeFile(targetUri, contents);
     vscode.window.showInformationMessage(`${selectedFormat.label} SBOM exported to ${vscode.workspace.asRelativePath(targetUri, false)}.`);
+  }
+
+  async exportCsv() {
+    const selectedScope = await vscode.window.showQuickPick([
+      { label: 'All direct dependencies', scope: 'all' },
+      { label: 'Current search and filters', scope: 'filtered' }
+    ], {
+      title: 'Export Dependency Report CSV',
+      placeHolder: 'Choose the dependencies to include'
+    });
+
+    if (!selectedScope) {
+      return;
+    }
+
+    const csv = this.model.createDependencyReportCsv(selectedScope.scope);
+    const defaultUri = vscode.Uri.file(path.join(path.dirname(this.model.selectedPackageJson), 'dependency-report.csv'));
+    const targetUri = await vscode.window.showSaveDialog({
+      title: 'Export Dependency Report CSV',
+      defaultUri,
+      filters: { 'CSV': ['csv'] }
+    });
+
+    if (!targetUri) {
+      return;
+    }
+
+    await vscode.workspace.fs.writeFile(targetUri, Buffer.from(csv, 'utf8'));
+    vscode.window.showInformationMessage(`Dependency report exported to ${vscode.workspace.asRelativePath(targetUri, false)}.`);
   }
 
   update() {

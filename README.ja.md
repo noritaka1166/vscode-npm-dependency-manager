@@ -23,6 +23,7 @@ npm-dependency-manager は、VS Code の中で npm dependencies を確認する�
 - 一覧または詳細画面から、確認ダイアログ付きで更新アクションを実行できます。
 - `package-lock.json` から resolved version、lock path、dependency tree context を読み取ります。
 - 選択中のプロジェクトを CycloneDX 1.5 JSON または SPDX 2.3 JSON 形式の SBOM として出力します。どちらも `package-lock.json` があれば、解決済みの npm dependency graph を含めます。
+- 全直接依存、または現在の検索・フィルタ結果を、version、license、更新、lockfile、脆弱性情報を含む CSV dependency report として出力します。
 - resolved version がある場合、npm audit bulk advisories を使って直接・推移的な脆弱性シグナルを確認します。
 - OSV vulnerability results と、CVE に紐づく EPSS / CISA KEV signal も表示します。
 - npm registry metadata から deprecated package message を表示します。
@@ -55,12 +56,14 @@ npm registry が README filename や placeholder text しか公開していな�
 6. 必要に応じて表示カラムやカラム幅を調整します。
 7. サイドバーでパッケージを展開すると transitive dependencies を確認できます。
 8. ダッシュボードの **Export SBOM**、または export command から CycloneDX JSON / SPDX JSON を選んで保存できます。
+9. **Export CSV** から、全直接依存または現在の検索・フィルタ結果を spreadsheet 向けの report として保存できます。
 
 ## コマンド
 
 - `npm Packages: Show Dashboard`
 - `npm Packages: Refresh`
 - `npm Packages: Export SBOM`（CycloneDX JSON または SPDX JSON）
+- `npm Packages: Export Dependency Report CSV`
 - `npm Packages: Open Package`
 
 ## 既知の制限
