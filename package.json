@@ -2,7 +2,7 @@
   "name": "npm-dependency-manager",
   "displayName": "npm-dependency-manager",
   "description": "Inspect npm dependencies, export CycloneDX and SPDX SBOMs, find outdated packages, vulnerabilities, licenses, and package-lock details from the VS Code sidebar.",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "publisher": "noritaka1166",
   "license": "MIT",
   "icon": "media/icon.png",

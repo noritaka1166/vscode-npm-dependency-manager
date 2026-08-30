@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.0.9
+
+- Documented the extension's privacy and network access behavior, including the public services contacted and the package data sent for package and security information.
+- Updated DOMPurify from 3.4.12 to 3.4.14.
+- Updated markdown-it from 14.3.0 to 15.0.1, including its transitive dependencies.
+
 ## 0.0.8
 
 - Added SBOM export for the selected project in CycloneDX 1.5 JSON and SPDX 2.3 JSON formats, including the resolved npm dependency graph when `package-lock.json` is available.
