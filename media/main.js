@@ -79,6 +79,16 @@
     if (message.type === 'detail') {
       renderDetail(message.detail);
     }
+
+    if (message.type === 'updateState') {
+      state.updateBusy = message.updateBusy;
+      state.updateResult = message.updateResult;
+      const status = document.getElementById('updateStatus');
+      if (status) status.innerHTML = DOMPurify.sanitize(renderUpdateStatus());
+      document.querySelectorAll('[data-update-package]').forEach((button) => {
+        button.disabled = Boolean(state.updateBusy);
+      });
+    }
   });
 
   bindExternalLinks();
@@ -102,6 +112,7 @@
         </div>
       </section>
 
+      <div id="updateStatus">${renderUpdateStatus()}</div>
       <section class="controlPanel">
         <div class="controlPrimary">
           <label class="field packageField">
@@ -314,8 +325,7 @@
         vscode.postMessage({
           type: 'runUpdate',
           name: button.dataset.updatePackage,
-          version: button.dataset.updateVersion,
-          dependencyType: button.dataset.dependencyType
+          packageJsonPath: state.selectedPackageJson
         });
       });
     });
@@ -580,6 +590,7 @@
           </div>
         </header>
 
+        <div id="updateStatus">${renderUpdateStatus()}</div>
         <div class="packageLayout">
           <article class="readmePanel">
             <div class="sectionTitle">README</div>
@@ -988,7 +999,7 @@
       return '<span class="mutedDash">-</span>';
     }
 
-    return `<button class="secondaryButton compactButton updateButton" data-update-package="${escapeAttr(dependency.name)}" data-update-version="${escapeAttr(dependency.latestVersion)}" data-dependency-type="${escapeAttr(dependency.type || '')}" title="Update ${escapeAttr(dependency.name)} to ${escapeAttr(dependency.latestVersion)}">Update</button>`;
+    return `<button class="secondaryButton compactButton updateButton" data-update-package="${escapeAttr(dependency.name)}" ${state.updateBusy ? 'disabled' : ''} title="Choose a version of ${escapeAttr(dependency.name)}">Update…</button>`;
   }
 
   function renderDetailUpdateAction(detail) {
@@ -999,8 +1010,8 @@
     const scope = detail.type === 'devDependencies' ? 'devDependency' : 'dependency';
     return `
       <div class="installAction">
-        <button class="secondaryButton updateButton" data-update-package="${escapeAttr(detail.name)}" data-update-version="${escapeAttr(detail.latestVersion)}" data-dependency-type="${escapeAttr(detail.type || '')}">
-          Update to ${escapeHtml(detail.latestVersion)}
+        <button class="secondaryButton updateButton" data-update-package="${escapeAttr(detail.name)}" ${state.updateBusy ? 'disabled' : ''}>
+          Choose version…
         </button>
         <small>Runs as a ${escapeHtml(scope)} update in the selected package.json directory.</small>
       </div>
@@ -1012,9 +1023,30 @@
       dependency?.name &&
       dependency.latestVersion &&
       !dependency.parentName &&
-      !dependency.dependencyDepth &&
-      ['major', 'minor', 'patch'].includes(dependency.updateType)
+      !dependency.dependencyDepth
     );
+  }
+
+  function renderUpdateStatus() {
+    const result = state.updateResult;
+    if (!result) return '';
+    const labels = { running: 'Updating', succeeded: 'Command succeeded', failed: 'Update failed', unknown: 'Result unconfirmed' };
+    const status = Object.hasOwn(labels, result.status) ? result.status : 'unknown';
+    const versionText = (value) => !value ? 'Unavailable' : value.resolvedVersion
+      ? `${value.resolvedVersion} (package.json: ${value.range})`
+      : `package.json: ${value.range} · Resolved version unavailable`;
+    return `<section class="updateResult ${status}" role="status" aria-live="polite">
+      <strong>${labels[status]}: ${escapeHtml(result.name)}</strong>
+      <p>${escapeHtml(result.message)}</p>
+      <dl>
+        <div><dt>Target</dt><dd>${escapeHtml(result.targetVersion)}</dd></div>
+        <div><dt>Before</dt><dd>${escapeHtml(versionText(result.before))}</dd></div>
+        ${status !== 'running' ? `<div><dt>After</dt><dd>${escapeHtml(versionText(result.after))}</dd></div>` : ''}
+      </dl>
+      ${result.refreshing ? '<p>Refreshing dependency and security information…</p>' : ''}
+      ${result.readError ? `<p>${escapeHtml(result.readError)}</p>` : ''}
+      ${result.refreshError ? `<p>${escapeHtml(result.refreshError)}</p>` : ''}
+    </section>`;
   }
 
   function getUpdateRowClass(dependency) {

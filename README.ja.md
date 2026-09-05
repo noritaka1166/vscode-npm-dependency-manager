@@ -20,7 +20,8 @@ npm-dependency-manager は、VS Code の中で npm dependencies を確認する�
 - package.json の指定バージョン、package-lock の resolved version、最新バージョン、公開日を比較できます。
 - dependency table のカラム表示/非表示とカラム幅を調整でき、設定は保持されます。
 - major / minor / patch の更新候補を見やすく表示します。
-- 一覧または詳細画面から、確認ダイアログ付きで更新アクションを実行できます。
+- 一覧または詳細画面から「指定範囲内の最新版」「registry の latest バージョン」「任意の公開バージョン（プレリリース・旧版を含む）」を選び、コマンドを確認して更新できます。
+- 更新を VS Code タスクとして実行し、終了後に依存・セキュリティ情報を再取得します。ダッシュボードにはコマンドの実行結果と更新前後のバージョンを表示します。
 - `package-lock.json` から resolved version、lock path、dependency tree context を読み取ります。
 - 選択中のプロジェクトを CycloneDX 1.5 JSON または SPDX 2.3 JSON 形式の SBOM として出力します。どちらも `package-lock.json` があれば、解決済みの npm dependency graph を含めます。
 - 全直接依存、または現在の検索・フィルタ結果を、version、license、更新、lockfile、脆弱性情報を含む CSV dependency report として出力します。
@@ -70,6 +71,14 @@ account、API key、sign-in は不要です。これらのサービスに、ワ�
 7. サイドバーでパッケージを展開すると transitive dependencies を確認できます。
 8. ダッシュボードの **Export SBOM**、または export command から CycloneDX JSON / SPDX JSON を選んで保存できます。
 9. **Export CSV** から、全直接依存または現在の検索・フィルタ結果を spreadsheet 向けの report として保存できます。
+
+## パッケージの更新
+
+一覧の **Update…** または詳細画面の **Choose version…** を押して更新先を選択します。対象プロジェクト、現在のバージョン、更新先、Node.js の必要バージョンや deprecated の注意事項を確認し、**Run command** で実行します。**Copy command** はコピーのみで、実行や結果の追跡は行いません。
+
+インストールのログはタスクのターミナルに表示されます。終了後は、成功・失敗・結果未確認（終了コードのない中断など）と更新前後の情報をダッシュボードに表示し、元のプロジェクトのファイルを読み直して依存・セキュリティ情報を再取得します。結果は拡張機能の実行セッション中、プロジェクトごとに保持します。同時に実行できる更新は1件です。
+
+対象は semver のバージョン範囲で指定された registry の依存です。`package.json` は先に保存してください。file・Git・workspace・alias 指定は対象外です。指定範囲内の更新も互換性を保証するものではなく、保存されるバージョン範囲はパッケージマネージャーに従います。解決済みバージョンは `package-lock.json` から取得します。他の lockfile や lockfile がない場合は、`package.json` の指定値と「解決済みバージョンは取得不可」を表示します。更新コマンドの成功と、情報の再取得失敗は分けて表示します。
 
 ## コマンド
 

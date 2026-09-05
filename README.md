@@ -20,7 +20,8 @@ npm-dependency-manager helps you inspect npm dependencies without leaving VS Cod
 - Compares the requested version, package-lock resolved version, latest version, and publish dates.
 - Lets you show, hide, and resize dependency table columns, with column preferences remembered.
 - Highlights major, minor, and patch update candidates.
-- Runs guarded update actions from the list or package detail page with a confirmation prompt.
+- Lets you choose the latest version within the declared range, the registry latest release, or a specific published version (including prereleases and older versions) from the list or package detail page, then confirms the command before running it.
+- Tracks updates as VS Code tasks, automatically reloads dependency and security information after completion, and displays the command outcome and before/after versions in the dashboard.
 - Reads `package-lock.json` for resolved versions, lock paths, and dependency tree context.
 - Exports the selected project as a CycloneDX 1.5 JSON or SPDX 2.3 JSON SBOM. Both formats include the resolved npm dependency graph when `package-lock.json` is available.
 - Exports a CSV dependency report for all direct dependencies or the current search and filter results. It includes versions, license, update, lockfile, and vulnerability information.
@@ -31,6 +32,14 @@ npm-dependency-manager helps you inspect npm dependencies without leaving VS Cod
 - Falls back to GitHub README files when the npm registry does not publish useful README content, including when GitHub repositories use common HTTPS, SSH, or hosted shorthand URL formats.
 - Opens README external links through VS Code.
 - Includes cache controls and explicit refresh actions for registry, audit, README, dependency, and download data.
+
+## Updating a dependency
+
+Select **Update…** in the list or **Choose version…** in package details. Choose an update target and review the project path, current version, target version, and any Node.js requirement or deprecation notice before selecting **Run command**. **Copy command** copies the command without running or tracking it.
+
+The task terminal shows installation logs. When the command ends, the dashboard displays success, failure, or an unconfirmed outcome (for example, cancellation without an exit code), rereads the original project's files, and refreshes dependency and security information. Results are kept per project for the current extension session. Only one update runs at a time.
+
+Version selection supports registry dependencies declared with a semantic version range. Save `package.json` first; file, Git, workspace, and alias dependencies are not supported. A version within the declared range does not guarantee compatibility. The package manager controls the saved version range. Resolved before/after versions are read from `package-lock.json`; for other lockfiles or a missing lockfile, the result explicitly shows the `package.json` declaration and marks the resolved version unavailable. A successful command and a failed information refresh are reported separately.
 
 ## Requirements
 

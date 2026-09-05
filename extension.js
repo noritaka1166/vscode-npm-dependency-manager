@@ -7,6 +7,7 @@ const { normalizeRepositoryUrl } = require('./lib/repository');
 const { PACKAGE_MANAGERS, createPackageInstallCommand, detectPackageManager } = require('./lib/package-manager');
 const { createCycloneDxSbom, createSpdxSbom } = require('./lib/sbom');
 const { createDependencyReportCsv } = require('./lib/dependency-report');
+const { DependencyUpdater } = require('./lib/dependency-update');
 
 const VIEW_ID = 'workspaceNpmSidebar.dependenciesView';
 const PANEL_TYPE = 'workspaceNpmSidebar.dashboard';
@@ -132,7 +133,14 @@ class NpmWorkspaceModel {
 
   async refreshFromNetwork() {
     this.clearCaches();
-    await this.refresh();
+    try {
+      await this.refresh();
+    } catch (error) {
+      this.isLoading = false;
+      this.message = getErrorMessage(error);
+      this.emit();
+      throw error;
+    }
   }
 
   clearCaches() {
@@ -235,27 +243,41 @@ class NpmWorkspaceModel {
       return;
     }
 
+    const loadId = this.loadId = (this.loadId || 0) + 1;
+    const packageJsonPath = this.selectedPackageJson;
     this.isLoading = true;
     this.message = 'Loading dependencies...';
     this.emit();
 
-    const packageJson = await readPackageJson(this.selectedPackageJson);
-    this.packageJson = packageJson;
-    this.lockInfo = await readLockInfo(this.selectedPackageJson, packageJson);
-    this.packageManager = this.lockInfo.packageManager;
-    this.dependencyCounts = getDependencyCounts(packageJson);
-    const entries = collectDependencyEntries(packageJson, 'all');
+    try {
+      const packageJson = await readPackageJson(packageJsonPath);
+      const lockInfo = await readLockInfo(packageJsonPath, packageJson);
+      if (loadId !== this.loadId) return;
+      const entries = collectDependencyEntries(packageJson, 'all');
 
-    this.allDependencies = await mapWithConcurrency(entries, 8, async (entry) => {
-      return this.enrichDependency(entry, this.lockInfo.packages.get(entry.name));
-    });
+      const dependencies = await mapWithConcurrency(entries, 8, async (entry) => {
+        return this.enrichDependency(entry, lockInfo.packages.get(entry.name), lockInfo);
+      });
 
-    await this.attachAuditInfo(this.allDependencies);
+      await this.security.enrichDependencies(dependencies, lockInfo);
+      if (loadId !== this.loadId) return;
+      this.packageJson = packageJson;
+      this.lockInfo = lockInfo;
+      this.packageManager = lockInfo.packageManager;
+      this.dependencyCounts = getDependencyCounts(packageJson);
+      this.allDependencies = dependencies;
 
-    this.isLoading = false;
-    this.message = '';
-    this.applyDependencyView(false);
-    this.emit();
+      this.isLoading = false;
+      this.message = '';
+      this.applyDependencyView(false);
+      this.emit();
+    } catch (error) {
+      if (loadId !== this.loadId) return;
+      this.isLoading = false;
+      this.message = getErrorMessage(error);
+      this.emit();
+      throw error;
+    }
   }
 
   createSbom(format = 'cyclonedx') {
@@ -294,7 +316,7 @@ class NpmWorkspaceModel {
     }
   }
 
-  async enrichDependency(entry, lockPackage) {
+  async enrichDependency(entry, lockPackage, lockInfo = this.lockInfo) {
     const registry = await this.getRegistryPackage(entry.name);
     const resolvedVersion = lockPackage?.version ? lockPackage.version : '';
     const versionInfo = resolveVersionInfo(registry, resolvedVersion || entry.currentVersion);
@@ -306,7 +328,7 @@ class NpmWorkspaceModel {
       latestVersion: registry.latestVersion,
       resolvedPublishedAt: getPublishedAt(registry.time, resolvedVersion || versionInfo.version),
       latestPublishedAt: getPublishedAt(registry.time, registry.latestVersion),
-      lockStatus: getDependencyLockStatus(lockPackage, this.lockInfo),
+      lockStatus: getDependencyLockStatus(lockPackage, lockInfo),
       lockPath: lockPackage?.path ? lockPackage.path : '',
       lockResolved: lockPackage?.resolved ? lockPackage.resolved : '',
       lockIntegrity: lockPackage?.integrity ? lockPackage.integrity : '',
@@ -582,32 +604,26 @@ class NpmWorkspaceModel {
     };
   }
 
-  createUpdateCommand(message) {
-    const name = String(message?.name ? message.name : '').trim();
-    const version = String(message?.version ? message.version : '').trim();
-    if (!name || !version) {
-      throw new Error('Package name and latest version are required to build an update command.');
-    }
-
-    if (!this.selectedPackageJson) {
+  async getUpdateContext(name, packageJsonPath) {
+    if (!this.packageFiles.some((file) => file.path === packageJsonPath)) {
       throw new Error('Select a package.json before running an update.');
     }
-
-    const knownDependency = this.allDependencies.find((dependency) => dependency.name === name);
-    if (!knownDependency) {
-      throw new Error(`${name} is not a direct dependency in the selected package.json.`);
+    if (vscode.workspace.textDocuments.some((document) => document.uri.fsPath === packageJsonPath && document.isDirty)) {
+      throw new Error('Save package.json before running an update or reading its result.');
     }
-
-    const effectiveType = knownDependency.type || 'dependencies';
-    const specifier = `${name}@${version}`;
-    const command = createPackageInstallCommand(this.packageManager, specifier, effectiveType);
-
+    const packageJson = await readPackageJson(packageJsonPath);
+    const entries = collectDependencyEntries(packageJson, 'all').filter((entry) => entry.name === name);
+    if (entries.length !== 1) throw new Error(`${name} must belong to exactly one direct dependency group.`);
+    const dependency = entries[0];
+    const lockInfo = await readLockInfo(packageJsonPath, packageJson);
     return {
       name,
-      version,
-      command,
-      cwd: path.dirname(this.selectedPackageJson),
-      packageManager: this.packageManager
+      packageJsonPath,
+      range: dependency.currentVersion,
+      type: dependency.type,
+      resolvedVersion: lockInfo.paths.get(`node_modules/${name}`)?.version || '',
+      packageManager: lockInfo.packageManager,
+      manifestSignature: JSON.stringify(packageJson)
     };
   }
 
@@ -713,6 +729,12 @@ class DashboardPanel {
     this.extensionUri = context.extensionUri;
     this.model = model;
     this.panel = undefined;
+    this.updater = new DependencyUpdater(vscode, {
+      getContext: (name, packageJsonPath) => model.getUpdateContext(name, packageJsonPath),
+      getRegistry: (name) => model.getRegistryPackage(name),
+      refresh: () => model.refreshFromNetwork()
+    }, () => this.post({ type: 'updateState', ...this.updater.getState(model.selectedPackageJson) }));
+    context.subscriptions.push(this.updater);
   }
 
   show() {
@@ -787,7 +809,10 @@ class DashboardPanel {
             await this.showPackage(message.name);
             break;
           case 'runUpdate':
-            await this.runUpdate(message);
+            if (message.packageJsonPath !== this.model.selectedPackageJson) {
+              throw new Error('The selected project changed. Choose the dependency again.');
+            }
+            await this.updater.run(message.name, message.packageJsonPath);
             break;
           case 'backToList':
             this.update();
@@ -817,33 +842,6 @@ class DashboardPanel {
     const dependency = await this.model.refreshPackage(name);
     const detail = await this.model.getDetail(name, dependency);
     this.post({ type: 'detail', detail });
-  }
-
-  async runUpdate(message) {
-    const command = this.model.createUpdateCommand(message);
-    const selection = await vscode.window.showWarningMessage(
-      `Run ${command.command}?`,
-      { modal: true, detail: `This will update ${command.name} in ${command.cwd}.` },
-      'Run command',
-      'Copy command'
-    );
-
-    if (selection === 'Copy command') {
-      await vscode.env.clipboard.writeText(command.command);
-      vscode.window.showInformationMessage(`Copied: ${command.command}`);
-      return;
-    }
-
-    if (selection !== 'Run command') {
-      return;
-    }
-
-    const terminal = vscode.window.createTerminal({
-      name: `${command.packageManager.label} dependency update`,
-      cwd: command.cwd
-    });
-    terminal.show();
-    terminal.sendText(command.command, true);
   }
 
   async exportSbom() {
@@ -908,6 +906,7 @@ class DashboardPanel {
   update() {
     this.post({
       ...this.model.getState(),
+      ...this.updater.getState(this.model.selectedPackageJson),
       visibleColumns: this.getVisibleColumns(),
       columnWidths: this.getColumnWidths()
     });
