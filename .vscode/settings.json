@@ -2,5 +2,11 @@
 	"sonarlint.connectedMode.project": {
 		"connectionId": "noritaka1166",
 		"projectKey": "noritaka1166_vscode-npm-dependency-manager"
-	}
+	},
+	"cSpell.words": [
+		"CISA",
+		"cyclonedx",
+		"epss",
+		"SSVC"
+	]
 }
