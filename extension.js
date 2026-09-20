@@ -199,6 +199,12 @@ class NpmWorkspaceModel {
     this.applyDependencyView();
   }
 
+  async setFilters(filters) {
+    Object.assign(this, normalizeFilterState(filters));
+    this.applyDependencyView(true, 'search');
+    await this.saveFilterState();
+  }
+
   async setSearchQuery(query) {
     this.searchQuery = String(query || '');
     await this.saveFilterState();
@@ -584,7 +590,7 @@ class NpmWorkspaceModel {
       riskFilter: this.riskFilter,
       updateFilter: this.updateFilter,
       licenseFilter: this.licenseFilter,
-      licenseOptions: getLicenseOptions(filterDependencyType(this.allDependencies, this.filter)),
+      licenseOptions: getLicenseOptions(this.allDependencies),
       searchQuery: this.searchQuery,
       dependencyCounts: this.dependencyCounts,
       isLoading: this.isLoading,
@@ -599,7 +605,7 @@ class NpmWorkspaceModel {
         error: this.lockInfo.error,
         packageManager: this.packageManager
       },
-      dependencies: filterDependencyType(this.allDependencies, this.filter),
+      dependencies: this.allDependencies,
       message: this.message
     };
   }
@@ -774,6 +780,9 @@ class DashboardPanel {
             break;
           case 'setFilter':
             await this.model.setFilter(message.filter);
+            break;
+          case 'setFilters':
+            await this.model.setFilters(message.filters);
             break;
           case 'setSearchQuery':
             await this.model.setSearchQuery(message.query);

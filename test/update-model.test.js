@@ -33,7 +33,7 @@ function createModel(files) {
     module: { exports: {} }, Buffer, console
   };
   vm.runInNewContext(`${fs.readFileSync(filename, 'utf8')}\nmodule.exports.Model = NpmWorkspaceModel;`, sandbox, { filename });
-  const model = new sandbox.module.exports.Model({ workspaceState: { get: () => undefined } });
+  const model = new sandbox.module.exports.Model({ workspaceState: { get: () => undefined, update: async () => {} } });
   model.packageFiles = [...files.keys()].filter((value) => value.endsWith('/package.json')).map((value) => ({ path: value }));
   return { model, documents };
 }
@@ -110,4 +110,19 @@ test('更新後の読込エラーでローディング表示が残らない', as
   await assert.rejects(model.loadDependencies(), /Missing file/);
   assert.equal(model.isLoading, false);
   assert.match(model.message, /Missing file/);
+});
+
+test('検索と複数フィルタを一括適用し、直後のCSV対象にも同じ結果を使う', async () => {
+  const { model } = createModel(new Map());
+  model.allDependencies = [
+    { name: 'alpha', description: 'HTTP client', type: 'dependencies', updateType: 'major', license: 'MIT' },
+    { name: 'beta', description: 'HTTP server', type: 'devDependencies', updateType: 'major', license: 'MIT' },
+    { name: 'gamma', description: 'HTTP client', type: 'dependencies', updateType: 'patch', license: 'MIT' }
+  ];
+  const saving = model.setFilters({ filter: 'dependencies', searchQuery: 'HTTP', updateFilter: 'major', licenseFilter: 'MIT' });
+  assert.equal(model.dependencies.length, 1);
+  assert.equal(model.dependencies[0].name, 'alpha');
+  await saving;
+  await model.setFilters({});
+  assert.equal(model.dependencies.length, 3);
 });

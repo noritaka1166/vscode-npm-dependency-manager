@@ -6,7 +6,7 @@
   const tableColumns = [
     { key: 'type', label: 'Type', minWidth: 42, defaultWidth: 52, maxWidth: 180 },
     { key: 'license', label: 'License', minWidth: 86, defaultWidth: 110, maxWidth: 360 },
-    { key: 'current', label: 'Current', minWidth: 68, defaultWidth: 92, maxWidth: 260 },
+    { key: 'current', label: 'Declared', minWidth: 68, defaultWidth: 92, maxWidth: 260 },
     { key: 'lock', label: 'Lock', minWidth: 70, defaultWidth: 86, maxWidth: 240 },
     { key: 'currentPublished', label: 'Current published', minWidth: 104, defaultWidth: 128, maxWidth: 300 },
     { key: 'latest', label: 'Latest', minWidth: 68, defaultWidth: 96, maxWidth: 260 },
@@ -16,7 +16,16 @@
     { key: 'action', label: 'Action', minWidth: 72, defaultWidth: 88, maxWidth: 220 }
   ];
   const allTableColumns = [packageColumn, ...tableColumns];
-  const defaultVisibleColumns = tableColumns.map((column) => column.key);
+  const defaultVisibleColumns = ['current', 'latest', 'update', 'risk', 'action'];
+  let searchTimer;
+  let listScrollTop = 0;
+  let showingDetail = false;
+  const filterDefaults = { filter: 'all', riskFilter: 'all', updateFilter: 'all', licenseFilter: 'all', searchQuery: '' };
+  const filterChoices = {
+    filter: [['all', 'All types'], ['dependencies', 'Production'], ['devDependencies', 'Development']],
+    riskFilter: [['all', 'Any risk'], ['vulnerable', 'Vulnerable'], ['deprecated', 'Deprecated'], ['notChecked', 'Not checked'], ['ok', 'No known issues']],
+    updateFilter: [['all', 'Any update'], ['update', 'Updates available'], ['major', 'Major'], ['minor', 'Minor'], ['patch', 'Patch'], ['current', 'Up to date']]
+  };
   let state = {
     packageFiles: [],
     selectedPackageJson: '',
@@ -45,6 +54,8 @@
       downloads: 0
     },
     dependencies: [],
+    sortBy: persistedState.sortBy || 'name',
+    filtersOpen: Boolean(persistedState.filtersOpen),
     visibleColumns: normalizeVisibleColumns(persistedState.visibleColumns),
     columnWidths: normalizeColumnWidths(persistedState.columnWidths)
   };
@@ -94,181 +105,188 @@
   bindExternalLinks();
 
   function renderList() {
-    const counts = state.dependencyCounts || { dependencies: 0, devDependencies: 0 };
+    const focusedId = document.activeElement?.id;
     const visibleDependencies = getVisibleDependencies();
-    const dependencyContent = renderDependencyContent(visibleDependencies);
-
     app.innerHTML = DOMPurify.sanitize(`
       <section class="dashboardHeader">
         <div class="headerTitle">
           <h1>npm Packages</h1>
-          <p>${escapeHtml(state.selectedLabel || state.selectedPackageJson || 'No package.json selected')}</p>
+          <p>Review dependencies. Choose what to update.</p>
         </div>
         <div class="headerActions">
-          <span class="headerMeta">${renderCompactStatus(state.packageManager, state.lockInfo, state.cacheStats)}</span>
-          <button id="exportSbomButton" class="secondaryButton" title="Save a CycloneDX or SPDX SBOM for the selected package.json">Export SBOM</button>
-          <button id="exportCsvButton" class="secondaryButton" title="Save a dependency report as CSV">Export CSV</button>
-          <button id="refreshAllButton" class="secondaryButton" title="Clear cache and reload registry data">Refresh all</button>
+          <details class="exportPicker">
+            <summary>Export</summary>
+            <div class="exportMenu">
+              <button id="exportCsvButton" class="secondaryButton">Dependency report (CSV)</button>
+              <button id="exportSbomButton" class="secondaryButton">Software bill of materials (SBOM)</button>
+            </div>
+          </details>
+          <button id="refreshAllButton" class="secondaryButton" ${state.isLoading ? 'disabled' : ''} title="Reload dependency and security information">${state.isLoading ? 'Refreshing…' : 'Refresh'}</button>
         </div>
       </section>
-
+      <div class="projectBar">
+        <label class="field packageField"><span>Project</span>
+          <select id="packageSelect" ${!state.packageFiles.length ? 'disabled' : ''}>
+            ${state.packageFiles.length ? state.packageFiles.map((file) => `<option value="${escapeAttr(file.path)}" ${file.path === state.selectedPackageJson ? 'selected' : ''}>${escapeHtml(file.label)}</option>`).join('') : '<option>No package.json found</option>'}
+          </select>
+        </label>
+        <span class="projectMeta">${renderCompactStatus(state.packageManager, state.lockInfo, state.cacheStats)}</span>
+      </div>
       <div id="updateStatus">${renderUpdateStatus()}</div>
-      <section class="controlPanel">
-        <div class="controlPrimary">
-          <label class="field packageField">
-            <span>package.json</span>
-            <select id="packageSelect">
-              ${state.packageFiles.map((file) => `<option value="${escapeAttr(file.path)}" ${file.path === state.selectedPackageJson ? 'selected' : ''}>${escapeHtml(file.label)}</option>`).join('')}
-            </select>
+      <nav class="overview" aria-label="Quick views">${renderOverview()}</nav>
+      <section class="controlPanel" aria-label="Search and filters">
+        <div class="searchToolbar">
+          <label class="field searchField"><span class="srOnly">Search packages</span>
+            <input id="searchInput" type="search" value="${escapeAttr(state.searchQuery)}" placeholder="Search by name or description…" aria-keyshortcuts="/">
           </label>
-
-          <label class="field searchField">
-            <span>Search packages</span>
-            <input id="searchInput" type="search" value="${escapeAttr(state.searchQuery || '')}" placeholder="Package name">
-          </label>
-        </div>
-
-        <div class="filterGrid">
-          <div class="filterGroup">
-            <span class="groupLabel">Type</span>
-            <div class="segments" role="group" aria-label="Dependency type">
-              ${segment('all', 'All')}
-              ${segment('dependencies', `dependencies ${counts.dependencies}`)}
-              ${segment('devDependencies', `dev ${counts.devDependencies}`)}
-            </div>
-          </div>
-
-          <div class="filterGroup">
-            <span class="groupLabel">Risk</span>
-            <div class="segments riskSegments" role="group" aria-label="Risk">
-              ${riskSegment('all', 'All')}
-              ${riskSegment('vulnerable', 'Vulnerable')}
-              ${riskSegment('deprecated', 'Deprecated')}
-              ${riskSegment('notChecked', 'Not checked')}
-              ${riskSegment('ok', 'OK')}
-            </div>
-          </div>
-
-          <div class="filterGroup wide">
-            <span class="groupLabel">Update</span>
-            <div class="segments updateSegments" role="group" aria-label="Update">
-              ${updateSegment('all', 'All updates')}
-              ${updateSegment('update', 'Updates')}
-              ${updateSegment('major', 'Major')}
-              ${updateSegment('minor', 'Minor')}
-              ${updateSegment('patch', 'Patch')}
-              ${updateSegment('current', 'Current')}
-            </div>
-          </div>
-
-          <label class="field licenseField">
-            <span>License</span>
-            <select id="licenseSelect">
-              ${renderLicenseOptions()}
+          <label class="field sortField"><span class="srOnly">Sort packages</span>
+            <select id="sortSelect" aria-label="Sort packages">
+              ${[['name', 'Name A–Z'], ['updates', 'Major updates first'], ['risk', 'Risk first']].map(([value, label]) => `<option value="${value}" ${state.sortBy === value ? 'selected' : ''}>${label}</option>`).join('')}
             </select>
           </label>
         </div>
-
+        <details id="filtersPanel" class="filtersPanel" ${state.filtersOpen ? 'open' : ''}>
+          <summary>Filters <span id="filterCount">${getActiveFilters().length || ''}</span></summary>
+          <div class="filterGrid">
+            ${Object.entries(filterChoices).map(([key, choices]) => `<label class="field"><span>${{filter:'Dependency type',riskFilter:'Risk',updateFilter:'Update'}[key]}</span><select data-view-filter="${key}">${choices.map(([value, label]) => `<option value="${value}" ${state[key] === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>`).join('')}
+            <label class="field"><span>License</span><select id="licenseSelect" data-view-filter="licenseFilter">${renderLicenseOptions()}</select></label>
+          </div>
+        </details>
+        <div id="activeFilters" class="activeFilters" aria-label="Active filters">${renderActiveFilters()}</div>
       </section>
-
       <section class="dependencySection">
         <div class="sectionHeader">
-          <div>
-            <h2>Packages</h2>
-            <p>${formatNumber(visibleDependencies.length)} shown from ${formatNumber(state.dependencies.length)} loaded packages</p>
-          </div>
+          <div><h2>Dependencies</h2><p id="resultCount" role="status" aria-live="polite">${formatNumber(visibleDependencies.length)} of ${formatNumber(state.dependencies.length)} packages</p></div>
           ${renderColumnPicker()}
         </div>
-        <div id="dependencyTable">
-          ${dependencyContent}
-        </div>
+        <div id="dependencyTable">${renderDependencyContent(visibleDependencies)}</div>
       </section>
     `);
-
-    const packageSelect = document.getElementById('packageSelect');
-    if (packageSelect) {
-      packageSelect.addEventListener('change', (event) => {
-        vscode.postMessage({ type: 'selectPackageJson', path: event.target.value });
-      });
-    }
-
-    const refreshAllButton = document.getElementById('refreshAllButton');
-    if (refreshAllButton) {
-      refreshAllButton.addEventListener('click', () => {
-        vscode.postMessage({ type: 'refreshAll' });
-      });
-    }
-
-    const exportSbomButton = document.getElementById('exportSbomButton');
-    if (exportSbomButton) {
-      exportSbomButton.addEventListener('click', () => {
-        vscode.postMessage({ type: 'exportSbom' });
-      });
-    }
-
-    const exportCsvButton = document.getElementById('exportCsvButton');
-    if (exportCsvButton) {
-      exportCsvButton.addEventListener('click', () => {
-        vscode.postMessage({ type: 'exportCsv' });
-      });
-    }
-
-    document.querySelectorAll('[data-filter]').forEach((button) => {
-      button.addEventListener('click', () => {
-        state.filter = button.dataset.filter;
-        persistViewState();
-        vscode.postMessage({ type: 'setFilter', filter: button.dataset.filter });
-      });
+    document.getElementById('packageSelect').addEventListener('change', (event) => {
+      clearTimeout(searchTimer);
+      sendFilters();
+      vscode.postMessage({ type: 'selectPackageJson', path: event.target.value });
     });
-
-    document.querySelectorAll('[data-risk-filter]').forEach((button) => {
-      button.addEventListener('click', () => {
-        state.riskFilter = button.dataset.riskFilter;
-        updateRiskSegments();
-        updateDependencyTable();
-        persistViewState();
-        vscode.postMessage({ type: 'setRiskFilter', filter: button.dataset.riskFilter });
-      });
+    document.getElementById('refreshAllButton').addEventListener('click', () => {
+      clearTimeout(searchTimer);
+      sendFilters();
+      vscode.postMessage({ type: 'refreshAll' });
     });
-
-    document.querySelectorAll('[data-update-filter]').forEach((button) => {
-      button.addEventListener('click', () => {
-        state.updateFilter = button.dataset.updateFilter;
-        updateUpdateSegments();
-        updateDependencyTable();
-        persistViewState();
-        vscode.postMessage({ type: 'setUpdateFilter', filter: button.dataset.updateFilter });
-      });
-    });
-
-    const licenseSelect = document.getElementById('licenseSelect');
-    if (licenseSelect) {
-      licenseSelect.addEventListener('change', (event) => {
-        state.licenseFilter = event.target.value;
-        updateDependencyTable();
-        persistViewState();
-        vscode.postMessage({ type: 'setLicenseFilter', filter: event.target.value });
-      });
-    }
-
-    const searchInput = document.getElementById('searchInput');
-    if (searchInput) {
-      let searchTimer;
-      searchInput.addEventListener('input', (event) => {
-        state.searchQuery = event.target.value;
-        updateDependencyTable();
+    for (const [id, type] of [['exportCsvButton', 'exportCsv'], ['exportSbomButton', 'exportSbom']]) {
+      document.getElementById(id).addEventListener('click', () => {
         clearTimeout(searchTimer);
-        searchTimer = setTimeout(() => {
-          persistViewState();
-          vscode.postMessage({ type: 'setSearchQuery', query: event.target.value });
-        }, 300);
+        sendFilters();
+        document.querySelector('.exportPicker').open = false;
+        vscode.postMessage({ type });
       });
     }
-
+    document.querySelectorAll('[data-quick-view]').forEach((button) => button.addEventListener('click', () => {
+      const view = button.dataset.quickView;
+      setViewFilters({ ...filterDefaults, updateFilter: view === 'updates' ? 'update' : 'all', riskFilter: view === 'risk' ? 'vulnerable' : 'all' });
+    }));
+    document.querySelectorAll('[data-view-filter]').forEach((select) => select.addEventListener('change', () => setViewFilters({ [select.dataset.viewFilter]: select.value })));
+    document.getElementById('filtersPanel').addEventListener('toggle', (event) => {
+      state.filtersOpen = event.currentTarget.open;
+      persistViewState();
+    });
+    document.getElementById('activeFilters').addEventListener('click', handleFilterClear);
+    document.getElementById('dependencyTable').addEventListener('click', handleFilterClear);
+    document.getElementById('sortSelect').addEventListener('change', (event) => {
+      state.sortBy = event.target.value;
+      persistViewState();
+      updateDependencyTable();
+    });
+    document.getElementById('searchInput').addEventListener('input', (event) => setViewFilters({ searchQuery: event.target.value }, true));
+    document.getElementById('searchInput').addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') setViewFilters({ searchQuery: '' });
+    });
     bindPackageButtons();
     bindColumnPicker();
     bindColumnResizers();
+    updateFilterControls();
+    if (focusedId) document.getElementById(focusedId)?.focus();
+    if (showingDetail) window.scrollTo(0, listScrollTop);
+    showingDetail = false;
   }
+
+  function renderOverview() {
+    const cards = [
+      ['all', 'All packages', state.dependencies.length, 'Browse this project'],
+      ['updates', 'Updates available', filterByUpdate(state.dependencies, 'update').length, 'Choose a target version'],
+      ['risk', 'Vulnerable', filterByRisk(state.dependencies, 'vulnerable').length, 'Review security findings']
+    ];
+    return cards.map(([key, label, count, hint]) => `<button class="overviewCard ${key}" data-quick-view="${key}" aria-pressed="false" ${state.isLoading ? 'disabled' : ''}><span>${label}</span><strong>${state.isLoading ? '—' : formatNumber(count)}</strong><small>${hint}</small></button>`).join('');
+  }
+
+  function getActiveFilters() {
+    return Object.keys(filterDefaults).filter((key) => state[key] !== filterDefaults[key] && state[key]);
+  }
+
+  function renderActiveFilters() {
+    const keys = getActiveFilters();
+    if (!keys.length) return '';
+    const chips = keys.map((key) => {
+      const label = key === 'searchQuery' ? `Search: ${state[key]}` : key === 'licenseFilter' ? `License: ${state[key] === '__unknown__' ? 'Unknown' : getLicenseDisplayValue(state[key])}` : filterChoices[key].find(([value]) => value === state[key])?.[1] || state[key];
+      return `<button class="filterChip" data-clear-filter="${key}" title="Remove ${escapeAttr(label)}" aria-label="Remove ${escapeAttr(label)}">${escapeHtml(label)} <span aria-hidden="true">×</span></button>`;
+    });
+    return `${chips.join('')}<button class="textButton" data-clear-all>Clear all</button>`;
+  }
+
+  function handleFilterClear(event) {
+    const button = event.target.closest('button');
+    if (button?.hasAttribute('data-clear-all')) {
+      setViewFilters({ ...filterDefaults });
+      document.getElementById('searchInput')?.focus();
+    } else if (button?.dataset.clearFilter) {
+      setViewFilters({ [button.dataset.clearFilter]: filterDefaults[button.dataset.clearFilter] });
+      document.getElementById('searchInput')?.focus();
+    }
+  }
+
+  function setViewFilters(patch, debounce = false) {
+    clearTimeout(searchTimer);
+    Object.assign(state, patch);
+    persistViewState();
+    updateFilterControls();
+    updateDependencyTable();
+    if (debounce) searchTimer = setTimeout(sendFilters, 200);
+    else sendFilters();
+  }
+
+  function sendFilters() {
+    vscode.postMessage({ type: 'setFilters', filters: Object.fromEntries(Object.keys(filterDefaults).map((key) => [key, state[key]])) });
+  }
+
+  function updateFilterControls() {
+    const search = document.getElementById('searchInput');
+    if (search && search.value !== state.searchQuery) search.value = state.searchQuery;
+    document.querySelectorAll('[data-view-filter]').forEach((select) => { select.value = state[select.dataset.viewFilter]; });
+    const chips = document.getElementById('activeFilters');
+    if (chips) chips.innerHTML = DOMPurify.sanitize(renderActiveFilters());
+    const count = document.getElementById('filterCount');
+    if (count) count.textContent = getActiveFilters().length || '';
+    document.querySelectorAll('[data-quick-view]').forEach((button) => {
+      const expected = { ...filterDefaults, updateFilter: button.dataset.quickView === 'updates' ? 'update' : 'all', riskFilter: button.dataset.quickView === 'risk' ? 'vulnerable' : 'all' };
+      button.setAttribute('aria-pressed', String(Object.keys(expected).every((key) => state[key] === expected[key])));
+    });
+  }
+
+  document.addEventListener('click', (event) => {
+    for (const selector of ['.exportPicker', '.columnPicker']) {
+      if (!event.target.closest(selector)) { const menu = document.querySelector(selector); if (menu) menu.open = false; }
+    }
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      const menu = event.target.closest('.exportPicker, .columnPicker');
+      if (menu) { menu.open = false; menu.querySelector('summary').focus(); }
+    }
+    if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.target.closest('input, select, textarea, [contenteditable]')) {
+      const search = document.getElementById('searchInput');
+      if (search) { event.preventDefault(); search.focus(); }
+    }
+  });
 
   function renderDependencyContent(visibleDependencies) {
     if (state.isLoading) {
@@ -286,13 +304,21 @@
       return;
     }
 
-    dependencyTable.innerHTML = DOMPurify.sanitize(renderDependencyTable(getVisibleDependencies()));
-    bindPackageButtons();
+    const visible = getVisibleDependencies();
+    dependencyTable.innerHTML = DOMPurify.sanitize(renderDependencyContent(visible));
+    const count = document.getElementById('resultCount');
+    if (count) count.textContent = `${formatNumber(visible.length)} of ${formatNumber(state.dependencies.length)} packages`;
+    bindPackageButtons(dependencyTable);
     bindColumnResizers();
   }
 
   function bindColumnPicker() {
     document.querySelectorAll('[data-column-toggle]').forEach(bindColumnToggle);
+    document.querySelectorAll('[data-column-preset]').forEach((button) => button.addEventListener('click', () => {
+      state.visibleColumns = button.dataset.columnPreset === 'all' ? tableColumns.map((column) => column.key) : [...defaultVisibleColumns];
+      document.querySelectorAll('[data-column-toggle]').forEach((checkbox) => { checkbox.checked = state.visibleColumns.includes(checkbox.dataset.columnToggle); });
+      handleColumnToggleChange();
+    }));
   }
 
   function bindColumnToggle(checkbox) {
@@ -312,14 +338,15 @@
     return input.dataset.columnToggle;
   }
 
-  function bindPackageButtons() {
-    document.querySelectorAll('.name[data-package]').forEach((button) => {
+  function bindPackageButtons(root = document) {
+    root.querySelectorAll('.name[data-package]').forEach((button) => {
       button.addEventListener('click', () => {
+        if (document.getElementById('dependencyTable')) listScrollTop = window.scrollY;
         vscode.postMessage({ type: 'openPackage', name: button.dataset.package });
       });
     });
 
-    document.querySelectorAll('[data-update-package]').forEach((button) => {
+    root.querySelectorAll('[data-update-package]').forEach((button) => {
       button.addEventListener('click', (event) => {
         event.stopPropagation();
         vscode.postMessage({
@@ -333,14 +360,21 @@
 
   function getVisibleDependencies() {
     const query = String(state.searchQuery || '').trim().toLowerCase();
-    const filtered = filterByLicense(filterByUpdate(filterByRisk(state.dependencies, state.riskFilter), state.updateFilter), state.licenseFilter);
-    if (!query) {
-      return filtered;
-    }
-
-    return filtered.filter((dependency) => {
+    const typed = state.dependencies.filter((dependency) => state.filter === 'all' || dependency.type === state.filter);
+    const filtered = filterByLicense(filterByUpdate(filterByRisk(typed, state.riskFilter), state.updateFilter), state.licenseFilter);
+    const matching = filtered.filter((dependency) => {
       return dependency.name.toLowerCase().includes(query) || String(dependency.description || '').toLowerCase().includes(query);
     });
+    const priority = (dependency) => state.sortBy === 'updates' ? ({major:3,minor:2,patch:1}[dependency.updateType] || 0) : state.sortBy === 'risk' ? riskPriority(dependency) : 0;
+    return matching.sort((a, b) => priority(b) - priority(a) || a.name.localeCompare(b.name));
+  }
+
+  function riskPriority(dependency) {
+    if (hasKev(dependency)) return 7;
+    if (filterByRisk([dependency], 'vulnerable').length) return 6;
+    if (dependency.deprecated) return 2;
+    if (dependency.auditStatus === 'unknown') return 1;
+    return 0;
   }
 
   function filterByRisk(dependencies, riskFilter) {
@@ -388,17 +422,16 @@
 
   function renderDependencyTable(dependencies) {
     if (!dependencies.length) {
-      return '<p class="empty">No packages match this filter or search.</p>';
+      return `<div class="emptyState"><strong>${state.dependencies.length ? 'No matching packages' : 'No dependencies yet'}</strong><p>${state.dependencies.length ? 'Try another search or remove a filter.' : 'Select a project with dependencies in package.json.'}</p>${getActiveFilters().length ? '<button class="secondaryButton" data-clear-all>Clear search and filters</button>' : ''}</div>`;
     }
 
     const visibleColumns = normalizeVisibleColumns(state.visibleColumns);
     const visibleColumnDefs = tableColumns.filter((column) => visibleColumns.includes(column.key));
-    const gridTemplate = getDependencyGridTemplate(visibleColumnDefs);
-    const minWidth = getDependencyMinWidth(visibleColumnDefs);
 
     return `
+      <div class="packageCards">${dependencies.map(renderPackageCard).join('')}</div>
       <div class="tableScroller">
-        <div class="list" style="--dependency-columns: ${escapeAttr(gridTemplate)}; --dependency-min-width: ${minWidth}px">
+        <div class="list">
         <div class="row head">
           ${renderHeaderCell(packageColumn)}
           ${visibleColumnDefs.map(renderHeaderCell).join('')}
@@ -416,11 +449,20 @@
     `;
   }
 
+  function renderPackageCard(dependency) {
+    return `<article class="packageCard ${getUpdateRowClass(dependency)}">
+      <div class="cardTitle"><button class="name" data-package="${escapeAttr(dependency.name)}">${escapeHtml(dependency.name)}</button><span class="pill">${dependency.type === 'dependencies' ? 'Production' : 'Development'}</span></div>
+      <p class="cardDescription">${escapeHtml(dependency.description || 'No description available.')}</p>
+      <div class="cardVersions"><span><small>Declared</small>${escapeHtml(dependency.currentVersion)}</span><span aria-hidden="true">→</span><span><small>Latest</small>${escapeHtml(dependency.latestVersion || 'Unknown')}</span></div>
+      <div class="cardFooter"><div class="cardBadges">${renderUpdate(dependency)} ${renderRisk(dependency)}</div>${renderUpdateAction(dependency)}</div>
+    </article>`;
+  }
+
   function renderHeaderCell(column) {
     return `
       <span class="columnHeader" data-column-header="${escapeAttr(column.key)}">
         <span>${escapeHtml(column.label)}</span>
-        <span class="columnResizeHandle" data-column-resize="${escapeAttr(column.key)}" title="Resize ${escapeAttr(column.label)}"></span>
+        <span class="columnResizeHandle" data-column-resize="${escapeAttr(column.key)}" title="Resize ${escapeAttr(column.label)} (arrow keys)" tabindex="0" role="separator" aria-label="Resize ${escapeAttr(column.label)}" aria-orientation="vertical" aria-valuemin="${column.minWidth}" aria-valuemax="${column.maxWidth}" aria-valuenow="${getColumnWidth(column.key)}"></span>
       </span>
     `;
   }
@@ -450,6 +492,7 @@
           <span id="columnSummary">${formatNumber(visibleColumns.length + 1)}</span>
         </summary>
         <div class="columnMenu">
+          <div class="columnPresets"><button class="textButton" data-column-preset="essential">Essential</button><button class="textButton" data-column-preset="all">All columns</button></div>
           <label class="columnOption disabled">
             <input type="checkbox" checked disabled>
             <span>Package</span>
@@ -505,7 +548,7 @@
   }
 
   function getDependencyGridTemplate(visibleColumnDefs = tableColumns.filter((column) => normalizeVisibleColumns(state.visibleColumns).includes(column.key))) {
-    return [packageColumn, ...visibleColumnDefs].map((column) => `${getColumnWidth(column.key)}px`).join(' ');
+    return [`minmax(${getColumnWidth('package')}px, 1fr)`, ...visibleColumnDefs.map((column) => `${getColumnWidth(column.key)}px`)].join(' ');
   }
 
   function getDependencyMinWidth(visibleColumnDefs) {
@@ -523,11 +566,24 @@
   }
 
   function bindColumnResizers() {
+    applyColumnWidths();
     document.querySelectorAll('[data-column-resize]').forEach(bindColumnResizer);
   }
 
   function bindColumnResizer(handle) {
     handle.addEventListener('pointerdown', startColumnResize);
+    handle.addEventListener('keydown', (event) => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const key = handle.dataset.columnResize;
+      const column = getColumnDefinition(key);
+      const width = event.key === 'Home' ? column.minWidth : event.key === 'End' ? column.maxWidth : getColumnWidth(key) + (event.key === 'ArrowRight' ? 10 : -10);
+      state.columnWidths[key] = clampColumnWidth(key, width);
+      handle.setAttribute('aria-valuenow', state.columnWidths[key]);
+      applyColumnWidths();
+      persistViewState();
+      vscode.postMessage({ type: 'setColumnWidths', widths: state.columnWidths });
+    });
   }
 
   function startColumnResize(event) {
@@ -545,6 +601,7 @@
         [columnKey]: startWidth + moveEvent.clientX - startX
       });
       applyColumnWidths();
+      handle.setAttribute('aria-valuenow', getColumnWidth(columnKey));
     };
 
     const onPointerUp = () => {
@@ -571,19 +628,23 @@
       riskFilter: state.riskFilter,
       updateFilter: state.updateFilter,
       licenseFilter: state.licenseFilter,
-      searchQuery: state.searchQuery
+      searchQuery: state.searchQuery,
+      sortBy: state.sortBy,
+      filtersOpen: state.filtersOpen
     });
   }
 
   function renderDetail(detail) {
+    showingDetail = true;
     app.innerHTML = DOMPurify.sanitize(`
       <div class="detailPage">
         <header class="packageHeader">
-          <button id="backButton" class="backButton" title="Back">‹</button>
+          <button id="backButton" class="backButton" title="Back to dependencies" aria-label="Back to dependencies">‹</button>
           <div class="packageIdentity">
             <div class="packageTitleLine">
               <h1>${escapeHtml(detail.name)}</h1>
               <span class="risk packageRisk">${renderRisk(detail)}</span>
+              ${canUpdateDependency(detail) ? `<button class="primaryUpdate updateButton" data-update-package="${escapeAttr(detail.name)}" ${state.updateBusy ? 'disabled' : ''}>Choose version…</button>` : ''}
               <button id="refreshPackageButton" class="secondaryButton compactButton" data-package="${escapeAttr(detail.name)}" title="Clear cache and reload this package">Refresh</button>
             </div>
             <p>${escapeHtml(detail.description || 'No description provided.')}</p>
@@ -601,7 +662,6 @@
             <section class="sideSection">
               <h2>Install</h2>
               <code class="installCommand">${escapeHtml(detail.installCommand || `npm install ${detail.name}`)}</code>
-              ${renderDetailUpdateAction(detail)}
             </section>
 
             <section class="sideSection">
@@ -737,18 +797,6 @@
     app.replaceChildren(container);
   }
 
-  function segment(value, label) {
-    return `<button data-filter="${value}" class="${state.filter === value ? 'active' : ''}">${escapeHtml(label)}</button>`;
-  }
-
-  function riskSegment(value, label) {
-    return `<button data-risk-filter="${value}" class="${state.riskFilter === value ? 'active' : ''}">${escapeHtml(label)}</button>`;
-  }
-
-  function updateSegment(value, label) {
-    return `<button data-update-filter="${value}" class="${state.updateFilter === value ? 'active' : ''}">${escapeHtml(label)}</button>`;
-  }
-
   function renderLicenseOptions() {
     const options = Array.isArray(state.licenseOptions) ? state.licenseOptions : [];
     const selected = state.licenseFilter || 'all';
@@ -758,26 +806,10 @@
     ].join('');
   }
 
-  function updateRiskSegments() {
-    document.querySelectorAll('[data-risk-filter]').forEach((button) => {
-      button.classList.toggle('active', button.dataset.riskFilter === state.riskFilter);
-    });
-  }
-
-  function updateUpdateSegments() {
-    document.querySelectorAll('[data-update-filter]').forEach((button) => {
-      button.classList.toggle('active', button.dataset.updateFilter === state.updateFilter);
-    });
-  }
-
-  function renderCompactStatus(packageManager, lockInfo, cacheStats) {
-    const stats = cacheStats || {};
-    const cacheTotal = ['registry', 'dependencies', 'audit', 'osv', 'epss', 'readme', 'downloads'].reduce((sum, key) => {
-      return sum + (Number.isFinite(stats[key]) ? stats[key] : 0);
-    }, 0);
+  function renderCompactStatus(packageManager, lockInfo) {
     const managerLabel = formatPackageManager(packageManager);
     const lockLabel = lockInfo?.exists ? (lockInfo.label || packageManager?.lockfile || 'lockfile') : 'no lock';
-    return `${escapeHtml(managerLabel)} / ${escapeHtml(lockLabel)} / cache ${formatNumber(cacheTotal)}`;
+    return `${escapeHtml(managerLabel)} / ${escapeHtml(lockLabel)}`;
   }
 
   function formatPackageManager(packageManager) {
@@ -1002,22 +1034,6 @@
     return `<button class="secondaryButton compactButton updateButton" data-update-package="${escapeAttr(dependency.name)}" ${state.updateBusy ? 'disabled' : ''} title="Choose a version of ${escapeAttr(dependency.name)}">Update…</button>`;
   }
 
-  function renderDetailUpdateAction(detail) {
-    if (!canUpdateDependency(detail)) {
-      return '';
-    }
-
-    const scope = detail.type === 'devDependencies' ? 'devDependency' : 'dependency';
-    return `
-      <div class="installAction">
-        <button class="secondaryButton updateButton" data-update-package="${escapeAttr(detail.name)}" ${state.updateBusy ? 'disabled' : ''}>
-          Choose version…
-        </button>
-        <small>Runs as a ${escapeHtml(scope)} update in the selected package.json directory.</small>
-      </div>
-    `;
-  }
-
   function canUpdateDependency(dependency) {
     return Boolean(
       dependency?.name &&
@@ -1037,12 +1053,13 @@
       : `package.json: ${value.range} · Resolved version unavailable`;
     return `<section class="updateResult ${status}" role="status" aria-live="polite">
       <strong>${labels[status]}: ${escapeHtml(result.name)}</strong>
-      <p>${escapeHtml(result.message)}</p>
-      <dl>
+      <p class="resultVersion">${escapeHtml(versionText(result.before))}${status !== 'running' ? ` → ${escapeHtml(versionText(result.after))}` : ` → Target ${escapeHtml(result.targetVersion)}`}</p>
+      <details ${status === 'failed' || status === 'unknown' || result.readError || result.refreshError ? 'open' : ''}><summary>Update details</summary>
+      <p>${escapeHtml(result.message)}</p><dl>
         <div><dt>Target</dt><dd>${escapeHtml(result.targetVersion)}</dd></div>
         <div><dt>Before</dt><dd>${escapeHtml(versionText(result.before))}</dd></div>
         ${status !== 'running' ? `<div><dt>After</dt><dd>${escapeHtml(versionText(result.after))}</dd></div>` : ''}
-      </dl>
+      </dl></details>
       ${result.refreshing ? '<p>Refreshing dependency and security information…</p>' : ''}
       ${result.readError ? `<p>${escapeHtml(result.readError)}</p>` : ''}
       ${result.refreshError ? `<p>${escapeHtml(result.refreshError)}</p>` : ''}
