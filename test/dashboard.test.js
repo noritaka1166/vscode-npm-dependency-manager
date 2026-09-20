@@ -6,9 +6,10 @@ const vm = require('node:vm');
 
 function dashboard(overrides = {}) {
   const source = fs.readFileSync(path.join(__dirname, '../media/main.js'), 'utf8');
+  const app = { addEventListener() {}, contains() { return false; } };
   const context = {
     acquireVsCodeApi: () => ({ getState: () => ({}), postMessage() {} }),
-    document: { getElementById() {}, addEventListener() {} },
+    document: { getElementById: (id) => id === 'app' ? app : undefined, addEventListener() {} },
     window: { location: { origin: 'https://webview.test' }, addEventListener() {} }
   };
   vm.runInNewContext(source.replace('  vscode.postMessage({ type: \'ready\' });',
