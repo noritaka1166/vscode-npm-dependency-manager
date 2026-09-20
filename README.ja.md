@@ -24,7 +24,7 @@ npm-dependency-manager は、VS Code の中で npm dependencies を確認する�
 - 更新を VS Code タスクとして実行し、終了後に依存・セキュリティ情報を再取得します。ダッシュボードにはコマンドの実行結果と更新前後のバージョンを表示します。
 - `package-lock.json` から resolved version、lock path、dependency tree context を読み取ります。
 - 選択中のプロジェクトを CycloneDX 1.5 JSON または SPDX 2.3 JSON 形式の SBOM として出力します。どちらも `package-lock.json` があれば、解決済みの npm dependency graph を含めます。
-- 全直接依存、または現在の検索・フィルタ結果を、version、license、更新、lockfile、脆弱性情報を含む CSV dependency report として出力します。
+- 全直接依存、または現在の検索・フィルタ結果を、version、license、更新、lockfile、脆弱性情報に加え、CISA KEV の該当状況、CVE、日付、ランサムウェア悪用シグナルを含む CSV dependency report として出力します。
 - resolved version がある場合、npm audit bulk advisories を使って直接・推移的な脆弱性シグナルを確認します。
 - OSV vulnerability results と、CVE に紐づく EPSS / CISA KEV signal も表示します。
 - npm registry metadata から deprecated package message を表示します。

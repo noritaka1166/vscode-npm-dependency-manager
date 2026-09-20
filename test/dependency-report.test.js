@@ -17,6 +17,14 @@ test('依存関係レポートを UTF-8 BOM 付き CSV に変換する', () => {
     osvVulnerabilities: [{}],
     transitiveVulnerabilityCount: 4,
     maxSeverity: 'high',
+    securitySignals: {
+      kev: [{
+        cve: 'CVE-2026-12345',
+        dateAdded: '2026-01-02',
+        dueDate: '2026-01-16',
+        knownRansomwareCampaignUse: 'Known'
+      }]
+    },
     deprecated: true,
     lockPath: 'node_modules/example-package',
     lockResolved: 'https://registry.npmjs.org/example-package/-/example-package-1.2.3.tgz',
@@ -24,15 +32,28 @@ test('依存関係レポートを UTF-8 BOM 付き CSV に変換する', () => {
   }]);
 
   assert.ok(csv.startsWith('\uFEFF"Package","Dependency type"'));
-  assert.ok(csv.includes('"3","4","high","Yes"'));
+  assert.ok(csv.includes('"3","4","high","Yes","CVE-2026-12345","2026-01-02","2026-01-16","Known","Yes"'));
   assert.ok(csv.includes('"Contains ""quoted"" text"'));
   assert.ok(csv.endsWith('\r\n'));
+});
+
+test('KEV がない依存関係は KEV 列を空欄で出力する', () => {
+  const csv = createDependencyReportCsv([{ name: 'safe-package' }]);
+
+  assert.ok(csv.includes('"CISA KEV","KEV CVEs","KEV added dates","KEV due dates","KEV ransomware use"'));
+  assert.ok(csv.includes('"safe-package","","","","","","","","","0","0","","No","","","","","No"'));
 });
 
 test('任意の外部テキストだけをCSV数式として解釈されない文字列に変換する', () => {
   const csv = createDependencyReportCsv([{
     name: '@biomejs/biome',
-    description: '=HYPERLINK("https://example.com")'
+    description: '=HYPERLINK("https://example.com")',
+    securitySignals: {
+      kev: [{
+        cve: 'CVE-2026-12345',
+        knownRansomwareCampaignUse: '=HYPERLINK("https://example.com")'
+      }]
+    }
   }]);
 
   assert.ok(csv.includes('"@biomejs/biome"'));
