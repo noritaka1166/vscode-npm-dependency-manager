@@ -856,6 +856,9 @@
     if (hasKev(dependency)) {
       badges.push(`<span class="badge kev">KEV</span>`);
     }
+    if (hasSsvc(dependency)) {
+      badges.push('<span class="badge ssvc">SSVC</span>');
+    }
     if (Number.isFinite(dependency.securitySignals?.maxEpss?.epss)) {
       badges.push(`<span class="badge epss">EPSS ${formatPercent(dependency.securitySignals.maxEpss.epss)}</span>`);
     }
@@ -874,6 +877,10 @@
 
   function hasKev(dependency) {
     return Boolean(dependency.securitySignals?.kev?.length);
+  }
+
+  function hasSsvc(dependency) {
+    return Boolean(dependency.securitySignals?.ssvc?.length);
   }
 
   function renderLockBadge(dependency) {
@@ -1143,7 +1150,8 @@
     const cves = signals.cves || [];
     const kev = signals.kev || [];
     const epss = signals.epss || [];
-    if (!cves.length && !kev.length && !epss.length) {
+    const ssvc = signals.ssvc || [];
+    if (!cves.length && !kev.length && !epss.length && !ssvc.length) {
       return '';
     }
 
@@ -1151,7 +1159,9 @@
       renderCveSignals(cves),
       renderKevSummary(kev),
       renderEpssSummary(epss),
-      kev.slice(0, 3).map(renderKevDetail).join('')
+      renderSsvcSummary(ssvc),
+      kev.slice(0, 3).map(renderKevDetail).join(''),
+      ssvc.slice(0, 3).map(renderSsvcDetail).join('')
     ].join('');
 
     return `
@@ -1185,10 +1195,28 @@
     return `<p>Highest EPSS: <strong>${formatPercent(epss[0].epss)}</strong>${percentile}</p>`;
   }
 
+  function renderSsvcSummary(ssvc) {
+    if (!ssvc.length) {
+      return '';
+    }
+    const suffix = ssvc.length === 1 ? '' : 's';
+    return `<p><span class="badge ssvc">SSVC</span> CISA decision points available for ${formatNumber(ssvc.length)} CVE${suffix}.</p>`;
+  }
+
   function renderKevDetail(entry) {
     const name = entry.vulnerabilityName || `${entry.vendorProject} ${entry.product}`;
     const date = entry.dateAdded ? ` · added ${escapeHtml(entry.dateAdded)}` : '';
     return `<p class="signalDetail">${escapeHtml(entry.cve)}: ${escapeHtml(name)}${date}</p>`;
+  }
+
+  function renderSsvcDetail(entry) {
+    const details = [
+      entry.exploitation && `exploitation: ${entry.exploitation}`,
+      entry.automatable && `automatable: ${entry.automatable}`,
+      entry.technicalImpact && `technical impact: ${entry.technicalImpact}`
+    ].filter(Boolean).join(' · ');
+    const version = entry.version ? ` · SSVC ${entry.version}` : '';
+    return `<p class="signalDetail">${escapeHtml(entry.cve)}: ${escapeHtml(details || 'decision points available')}${escapeHtml(version)}</p>`;
   }
 
   function renderAdvisoryGroup(title, advisories, kind, transitive = false) {

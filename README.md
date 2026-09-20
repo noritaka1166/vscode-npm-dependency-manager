@@ -26,7 +26,7 @@ npm-dependency-manager helps you inspect npm dependencies without leaving VS Cod
 - Exports the selected project as a CycloneDX 1.5 JSON or SPDX 2.3 JSON SBOM. Both formats include the resolved npm dependency graph when `package-lock.json` is available.
 - Exports a CSV dependency report for all direct dependencies or the current search and filter results. It includes versions, license, update, lockfile, vulnerability information, and CISA KEV status, CVEs, dates, and ransomware-use signals.
 - Checks npm audit bulk advisories for direct and transitive vulnerabilities when a resolved version is available.
-- Adds OSV vulnerability results plus CVE-linked EPSS and CISA KEV signals when available.
+- Adds OSV vulnerability results plus CVE-linked EPSS, CISA KEV, and CISA SSVC decision points when available.
 - Shows deprecated package messages from npm registry metadata.
 - Opens a polished package detail page with npm metadata, weekly downloads, links, security information, lockfile context, dependencies, and rendered README content.
 - Falls back to GitHub README files when the npm registry does not publish useful README content, including when GitHub repositories use common HTTPS, SSH, or hosted shorthand URL formats.
@@ -63,7 +63,7 @@ To provide current package and security information, it makes requests only to t
 
 - Package names to the npm registry and npm downloads API.
 - Package names and resolved versions from the selected project's `package.json` and `package-lock.json` to npm audit and OSV vulnerability APIs. This can include direct and transitive dependencies.
-- CVE identifiers returned by vulnerability services to the FIRST EPSS API, and a request for CISA's public KEV catalog.
+- CVE identifiers returned by vulnerability services to the FIRST EPSS API, a request for CISA's public KEV catalog, and CISA's public Vulnrichment dataset on GitHub for SSVC decision points.
 - A request for a public repository README from `raw.githubusercontent.com` when the npm registry does not provide useful README content.
 
 No account, API key, or sign-in is required. The extension does not send your workspace source files or credentials to these services.
@@ -95,4 +95,5 @@ No account, API key, or sign-in is required. The extension does not send your wo
 - SBOM dependency-graph export currently parses `package-lock.json`. Without it, the SBOM contains the direct dependencies from `package.json` as unresolved components.
 - Transitive vulnerability attribution depends on the dependency graph recorded in `package-lock.json`.
 - EPSS and KEV signals are shown only for advisories that expose CVE identifiers.
+- SSVC displays CISA's available decision points—exploitation, automatable, and technical impact—for each CVE. It does not create an organization-specific SSVC response decision such as Track, Attend, or Act.
 - README rendering supports common npm/GitHub Markdown, but unusual HTML or repository asset layouts may not render exactly like npmjs.com.

@@ -26,7 +26,7 @@ npm-dependency-manager は、VS Code の中で npm dependencies を確認する�
 - 選択中のプロジェクトを CycloneDX 1.5 JSON または SPDX 2.3 JSON 形式の SBOM として出力します。どちらも `package-lock.json` があれば、解決済みの npm dependency graph を含めます。
 - 全直接依存、または現在の検索・フィルタ結果を、version、license、更新、lockfile、脆弱性情報に加え、CISA KEV の該当状況、CVE、日付、ランサムウェア悪用シグナルを含む CSV dependency report として出力します。
 - resolved version がある場合、npm audit bulk advisories を使って直接・推移的な脆弱性シグナルを確認します。
-- OSV vulnerability results と、CVE に紐づく EPSS / CISA KEV signal も表示します。
+- OSV vulnerability results と、CVE に紐づく EPSS / CISA KEV signal / CISA SSVC の意思決定要素も表示します。
 - npm registry metadata から deprecated package message を表示します。
 - パッケージ詳細画面で npm metadata、weekly downloads、リンク、セキュリティ情報、lockfile context、dependencies、レンダリング済み README を確認できます。
 - npm registry に有用な README が公開されていない場合、GitHub repository の一般的な HTTPS / SSH / ホスト名省略形式の URL にも対応して README への fallback を試みます。
@@ -55,7 +55,7 @@ npm registry が README filename や placeholder text しか公開していな�
 
 - npm registry と npm downloads API には、package name を送信します。
 - npm audit と OSV vulnerability API には、選択中の project の `package.json` と `package-lock.json` にある package name と resolved version を送信します。direct dependency と transitive dependency の両方が対象になる場合があります。
-- vulnerability service が返す CVE identifier を FIRST EPSS API に送信し、CISA の公開 KEV catalog を取得します。
+- vulnerability service が返す CVE identifier を FIRST EPSS API に送信し、CISA の公開 KEV catalog と、SSVC の意思決定要素を得るための CISA 公開 Vulnrichment dataset（GitHub）を取得します。
 - npm registry に有用な README がない場合、`raw.githubusercontent.com` にある公開 repository の README を取得します。
 
 account、API key、sign-in は不要です。これらのサービスに、ワークスペースの source file や credential を送信することはありません。
@@ -95,4 +95,5 @@ account、API key、sign-in は不要です。これらのサービスに、ワ�
 - SBOM の dependency graph 出力は現在 `package-lock.json` の解析に対応しています。lockfile がない場合は、`package.json` の直接依存を未解決 component として出力します。
 - transitive vulnerability の関連付けは、`package-lock.json` に記録されている dependency graph に依存します。
 - EPSS / KEV signals は、advisory に CVE identifier が含まれている場合のみ表示されます。
+- SSVC では、CISA が公開している CVE ごとの意思決定要素（exploitation、automatable、technical impact）を表示します。組織固有の状況が必要な `Track`、`Attend`、`Act` などの対応判断を拡張機能が自動で決定することはありません。
 - README rendering は一般的な npm / GitHub Markdown を想定していますが、特殊な HTML や repository asset layout は npmjs.com と完全に同じ表示にならない場合があります。

@@ -23,6 +23,13 @@ test('依存関係レポートを UTF-8 BOM 付き CSV に変換する', () => {
         dateAdded: '2026-01-02',
         dueDate: '2026-01-16',
         knownRansomwareCampaignUse: 'Known'
+      }],
+      ssvc: [{
+        cve: 'CVE-2026-12345',
+        exploitation: 'poc',
+        automatable: 'yes',
+        technicalImpact: 'total',
+        version: '2.0.3'
       }]
     },
     deprecated: true,
@@ -32,7 +39,7 @@ test('依存関係レポートを UTF-8 BOM 付き CSV に変換する', () => {
   }]);
 
   assert.ok(csv.startsWith('\uFEFF"Package","Dependency type"'));
-  assert.ok(csv.includes('"3","4","high","Yes","CVE-2026-12345","2026-01-02","2026-01-16","Known","Yes"'));
+  assert.ok(csv.includes('"3","4","high","Yes","CVE-2026-12345","2026-01-02","2026-01-16","Known","Yes","CVE-2026-12345","poc","yes","total","2.0.3","Yes"'));
   assert.ok(csv.includes('"Contains ""quoted"" text"'));
   assert.ok(csv.endsWith('\r\n'));
 });
@@ -40,8 +47,8 @@ test('依存関係レポートを UTF-8 BOM 付き CSV に変換する', () => {
 test('KEV がない依存関係は KEV 列を空欄で出力する', () => {
   const csv = createDependencyReportCsv([{ name: 'safe-package' }]);
 
-  assert.ok(csv.includes('"CISA KEV","KEV CVEs","KEV added dates","KEV due dates","KEV ransomware use"'));
-  assert.ok(csv.includes('"safe-package","","","","","","","","","0","0","","No","","","","","No"'));
+  assert.ok(csv.includes('"CISA KEV","KEV CVEs","KEV added dates","KEV due dates","KEV ransomware use","CISA SSVC available","SSVC CVEs","SSVC exploitation","SSVC automatable","SSVC technical impact","SSVC version"'));
+  assert.ok(csv.includes('"safe-package","","","","","","","","","0","0","","No","","","","","No","","","","","","No"'));
 });
 
 test('任意の外部テキストだけをCSV数式として解釈されない文字列に変換する', () => {
@@ -52,6 +59,10 @@ test('任意の外部テキストだけをCSV数式として解釈されない�
       kev: [{
         cve: 'CVE-2026-12345',
         knownRansomwareCampaignUse: '=HYPERLINK("https://example.com")'
+      }],
+      ssvc: [{
+        cve: 'CVE-2026-12345',
+        exploitation: '=HYPERLINK("https://example.com")'
       }]
     }
   }]);

@@ -622,7 +622,8 @@ input {
 }
 
 .badge.osv,
-.badge.epss {
+.badge.epss,
+.badge.ssvc {
   color: var(--vscode-textLink-foreground);
   background: color-mix(in srgb, var(--vscode-textLink-foreground) 14%, transparent);
 }
