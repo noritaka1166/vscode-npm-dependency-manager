@@ -1,11 +1,14 @@
 # Change Log
 
-## Unreleased
+## 0.0.10
 
 - Added update-target selection for the latest version within the declared range, the registry latest release, or any published version, including prereleases and older releases.
 - Run dependency updates as tracked VS Code tasks and show success, failure, or an unconfirmed outcome with before/after file data in the dashboard.
 - Automatically refresh dependency and security information after updates, preserving command outcomes when refresh fails.
 - Prevent overlapping updates and stale project loads; keep update results associated with the original project.
+- Added CISA SSVC decision-point data to vulnerability details and CSV dependency reports when it is available.
+- Improved aggregation of direct and transitive vulnerability data from lockfile dependency graphs.
+- Updated DOMPurify to 3.4.15 and markdown-it to 15.0.2.
 
 ## 0.0.9
 

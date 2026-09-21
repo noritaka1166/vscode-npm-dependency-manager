@@ -2,7 +2,7 @@
   "name": "npm-dependency-manager",
   "displayName": "npm Dependency Manager: Audit & SBOM",
   "description": "Manage npm dependencies in VS Code: run npm audit, review vulnerabilities, updates, licenses, and package-lock.json, then export CycloneDX or SPDX SBOMs and CSV reports.",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "publisher": "noritaka1166",
   "license": "MIT",
   "icon": "media/icon.png",
