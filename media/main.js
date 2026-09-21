@@ -104,6 +104,17 @@
 
   bindExternalLinks();
 
+  function renderFilterFields() {
+    const labels = { filter: 'Dependency type', riskFilter: 'Risk', updateFilter: 'Update' };
+    return Object.entries(filterChoices).map(([key, choices]) => {
+      const options = choices.map(([value, label]) => {
+        const selected = state[key] === value ? 'selected' : '';
+        return `<option value="${value}" ${selected}>${label}</option>`;
+      }).join('');
+      return `<label class="field"><span>${labels[key]}</span><select data-view-filter="${key}">${options}</select></label>`;
+    }).join('');
+  }
+
   function renderList() {
     const focusedId = document.activeElement?.id;
     const visibleDependencies = getVisibleDependencies();
@@ -130,7 +141,7 @@
             ${state.packageFiles.length ? state.packageFiles.map((file) => `<option value="${escapeAttr(file.path)}" ${file.path === state.selectedPackageJson ? 'selected' : ''}>${escapeHtml(file.label)}</option>`).join('') : '<option>No package.json found</option>'}
           </select>
         </label>
-        <span class="projectMeta">${renderCompactStatus(state.packageManager, state.lockInfo, state.cacheStats)}</span>
+        <span class="projectMeta">${renderCompactStatus(state.packageManager, state.lockInfo)}</span>
       </div>
       <div id="updateStatus">${renderUpdateStatus()}</div>
       <nav class="overview" aria-label="Quick views">${renderOverview()}</nav>
@@ -148,7 +159,7 @@
         <details id="filtersPanel" class="filtersPanel" ${state.filtersOpen ? 'open' : ''}>
           <summary>Filters <span id="filterCount">${getActiveFilters().length || ''}</span></summary>
           <div class="filterGrid">
-            ${Object.entries(filterChoices).map(([key, choices]) => `<label class="field"><span>${{filter:'Dependency type',riskFilter:'Risk',updateFilter:'Update'}[key]}</span><select data-view-filter="${key}">${choices.map(([value, label]) => `<option value="${value}" ${state[key] === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>`).join('')}
+            ${renderFilterFields()}
             <label class="field"><span>License</span><select id="licenseSelect" data-view-filter="licenseFilter">${renderLicenseOptions()}</select></label>
           </div>
         </details>
@@ -226,7 +237,15 @@
     const keys = getActiveFilters();
     if (!keys.length) return '';
     const chips = keys.map((key) => {
-      const label = key === 'searchQuery' ? `Search: ${state[key]}` : key === 'licenseFilter' ? `License: ${state[key] === '__unknown__' ? 'Unknown' : getLicenseDisplayValue(state[key])}` : filterChoices[key].find(([value]) => value === state[key])?.[1] || state[key];
+      let label;
+      if (key === 'searchQuery') {
+        label = `Search: ${state[key]}`;
+      } else if (key === 'licenseFilter') {
+        const licenseLabel = state[key] === '__unknown__' ? 'Unknown' : getLicenseDisplayValue(state[key]);
+        label = `License: ${licenseLabel}`;
+      } else {
+        label = filterChoices[key].find(([value]) => value === state[key])?.[1] || state[key];
+      }
       return `<button class="filterChip" data-clear-filter="${key}" title="Remove ${escapeAttr(label)}" aria-label="Remove ${escapeAttr(label)}">${escapeHtml(label)} <span aria-hidden="true">×</span></button>`;
     });
     return `${chips.join('')}<button class="textButton" data-clear-all>Clear all</button>`;
@@ -365,7 +384,15 @@
     const matching = filtered.filter((dependency) => {
       return dependency.name.toLowerCase().includes(query) || String(dependency.description || '').toLowerCase().includes(query);
     });
-    const priority = (dependency) => state.sortBy === 'updates' ? ({major:3,minor:2,patch:1}[dependency.updateType] || 0) : state.sortBy === 'risk' ? riskPriority(dependency) : 0;
+    const priority = (dependency) => {
+      if (state.sortBy === 'updates') {
+        return {major:3,minor:2,patch:1}[dependency.updateType] || 0;
+      }
+      if (state.sortBy === 'risk') {
+        return riskPriority(dependency);
+      }
+      return 0;
+    };
     return matching.sort((a, b) => priority(b) - priority(a) || a.name.localeCompare(b.name));
   }
 
@@ -577,7 +604,14 @@
       event.preventDefault();
       const key = handle.dataset.columnResize;
       const column = getColumnDefinition(key);
-      const width = event.key === 'Home' ? column.minWidth : event.key === 'End' ? column.maxWidth : getColumnWidth(key) + (event.key === 'ArrowRight' ? 10 : -10);
+      let width;
+      if (event.key === 'Home') {
+        width = column.minWidth;
+      } else if (event.key === 'End') {
+        width = column.maxWidth;
+      } else {
+        width = getColumnWidth(key) + (event.key === 'ArrowRight' ? 10 : -10);
+      }
       state.columnWidths[key] = clampColumnWidth(key, width);
       handle.setAttribute('aria-valuenow', state.columnWidths[key]);
       applyColumnWidths();
@@ -636,6 +670,11 @@
 
   function renderDetail(detail) {
     showingDetail = true;
+    let updateButtonMarkup = '';
+    if (canUpdateDependency(detail)) {
+      const disabledAttribute = state.updateBusy ? 'disabled' : '';
+      updateButtonMarkup = `<button class="primaryUpdate updateButton" data-update-package="${escapeAttr(detail.name)}" ${disabledAttribute}>Choose version…</button>`;
+    }
     app.innerHTML = DOMPurify.sanitize(`
       <div class="detailPage">
         <header class="packageHeader">
@@ -644,7 +683,7 @@
             <div class="packageTitleLine">
               <h1>${escapeHtml(detail.name)}</h1>
               <span class="risk packageRisk">${renderRisk(detail)}</span>
-              ${canUpdateDependency(detail) ? `<button class="primaryUpdate updateButton" data-update-package="${escapeAttr(detail.name)}" ${state.updateBusy ? 'disabled' : ''}>Choose version…</button>` : ''}
+              ${updateButtonMarkup}
               <button id="refreshPackageButton" class="secondaryButton compactButton" data-package="${escapeAttr(detail.name)}" title="Clear cache and reload this package">Refresh</button>
             </div>
             <p>${escapeHtml(detail.description || 'No description provided.')}</p>
@@ -1055,9 +1094,15 @@
     if (!result) return '';
     const labels = { running: 'Updating', succeeded: 'Command succeeded', failed: 'Update failed', unknown: 'Result unconfirmed' };
     const status = Object.hasOwn(labels, result.status) ? result.status : 'unknown';
-    const versionText = (value) => !value ? 'Unavailable' : value.resolvedVersion
-      ? `${value.resolvedVersion} (package.json: ${value.range})`
-      : `package.json: ${value.range} · Resolved version unavailable`;
+    const versionText = (value) => {
+      if (!value) {
+        return 'Unavailable';
+      }
+      if (value.resolvedVersion) {
+        return `${value.resolvedVersion} (package.json: ${value.range})`;
+      }
+      return `package.json: ${value.range} · Resolved version unavailable`;
+    };
     return `<section class="updateResult ${status}" role="status" aria-live="polite">
       <strong>${labels[status]}: ${escapeHtml(result.name)}</strong>
       <p class="resultVersion">${escapeHtml(versionText(result.before))}${status !== 'running' ? ` → ${escapeHtml(versionText(result.after))}` : ` → Target ${escapeHtml(result.targetVersion)}`}</p>
