@@ -11,7 +11,7 @@ function createModel(files) {
   const documents = [];
   const vscode = {
     TreeItem: class {},
-    EventEmitter: class { event() {} fire() {} },
+    EventEmitter: class { event() {} fire() {} dispose() {} },
     Uri: { file: (fsPath) => ({ fsPath }) },
     FileType: { File: 1 },
     workspace: {
@@ -76,6 +76,78 @@ function stubRegistryAndSecurity(model, versions = { '1.0.0': {}, '2.0.0': {} })
   model.security.getThreatIntelForCves = async () => ({ epss: new Map(), kev: new Map(), ssvc: new Map() });
   return { auditInputs, osvInputs };
 }
+
+test('プロジェクト切り替えで古いregistry通信を中断し、遅れて返る結果をキャッシュしない', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  let firstStarted;
+  const started = new Promise((resolve) => { firstStarted = resolve; });
+  let releaseFirst;
+  let firstSignal;
+  let requests = 0;
+  global.fetch = async (_, options) => {
+    requests++;
+    if (requests === 1) {
+      firstSignal = options.signal;
+      firstStarted();
+      return new Promise((resolve) => { releaseFirst = resolve; });
+    }
+    return { ok: true, json: async () => ({ 'dist-tags': { latest: '2.0.0' }, versions: { '2.0.0': {} } }) };
+  };
+  const { model } = createModel(new Map([
+    ['/a/package.json', { dependencies: { example: '^1.0.0' } }],
+    ['/b/package.json', { dependencies: { example: '^2.0.0' } }]
+  ]));
+  model.selectedPackageJson = '/a/package.json';
+  const first = model.loadDependencies();
+  await started;
+  await model.selectPackageJson('/b/package.json');
+  assert(firstSignal.aborted);
+  await first;
+  releaseFirst({ ok: true, json: async () => ({ 'dist-tags': { latest: '1.0.0' } }) });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(model.registryCache.get('example').latestVersion, '2.0.0');
+  assert.equal(model.allDependencies[0].currentVersion, '^2.0.0');
+  assert.equal(model.isLoading, false);
+  assert.equal(model.message, '');
+  assert.equal(requests, 2);
+});
+
+test('拡張機能終了で詳細画面のregistryとdownloads通信を両方中断する', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  const signals = [];
+  global.fetch = async (_, options) => {
+    signals.push(options.signal);
+    return new Promise(() => {});
+  };
+  const { model } = createModel(new Map());
+  const detail = model.getDetail('example');
+  const check = assert.rejects(detail, { name: 'AbortError' });
+  model.dispose();
+  await check;
+  assert.equal(signals.length, 2);
+  assert(signals.every((signal) => signal.aborted));
+  assert.equal(model.registryCache.size, 0);
+  assert.equal(model.downloadCache.size, 0);
+});
+
+test('registryのタイムアウト後に一覧のローディングが終了し再試行できる', async (t) => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  global.fetch = async () => new Promise(() => {});
+  const { NetworkClient } = require('../lib/network');
+  const { model } = createModel(new Map([['/a/package.json', { dependencies: { example: '^1.0.0' } }]]));
+  model.network = new NetworkClient({ timeoutMs: 5 });
+  model.selectedPackageJson = '/a/package.json';
+  await model.loadDependencies();
+  assert.equal(model.isLoading, false);
+  assert.match(model.allDependencies[0].description, /timed out/);
+  assert.equal(model.registryCache.size, 0);
+  global.fetch = async () => ({ ok: true, json: async () => ({ 'dist-tags': { latest: '1.0.0' }, versions: { '1.0.0': {} } }) });
+  await model.loadDependencies();
+  assert.equal(model.allDependencies[0].latestVersion, '1.0.0');
+});
 
 test('lockfileなし・未対応lockfileでは一覧と詳細に推測した解決済み値を入れず監査しない', async () => {
   for (const [packageManager, lockfile] of [['npm', ''], ['pnpm', 'pnpm-lock.yaml'], ['yarn', 'yarn.lock'], ['bun', 'bun.lock']]) {

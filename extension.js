@@ -9,6 +9,7 @@ const { createCycloneDxSbom, createSpdxSbom } = require('./lib/sbom');
 const { createDependencyReportCsv } = require('./lib/dependency-report');
 const { DependencyUpdater } = require('./lib/dependency-update');
 const { resolveLockDependency } = require('./lib/lock-dependency');
+const { NetworkClient, isCancellation } = require('./lib/network');
 
 const VIEW_ID = 'workspaceNpmSidebar.dependenciesView';
 const PANEL_TYPE = 'workspaceNpmSidebar.dashboard';
@@ -30,6 +31,7 @@ function activate(context) {
   const treeView = vscode.window.createTreeView(VIEW_ID, { treeDataProvider: tree });
 
   context.subscriptions.push(
+    model,
     treeView,
     treeView.onDidChangeVisibility((event) => {
       if (event.visible) {
@@ -60,11 +62,13 @@ function activate(context) {
     })
   );
 
-  model.refresh().catch((error) => vscode.window.showErrorMessage(getErrorMessage(error)));
+  model.refresh().catch((error) => {
+    if (!isCancellation(error)) vscode.window.showErrorMessage(getErrorMessage(error));
+  });
 }
 
 function deactivate() {
-  // The extension does not hold resources that need explicit disposal.
+  // VS Code disposes the model and cancels outstanding requests through subscriptions.
 }
 
 async function openExternalUrl(value) {
@@ -100,7 +104,8 @@ class NpmWorkspaceModel {
     this.packageManager = this.lockInfo.packageManager;
     this.registryCache = new Map();
     this.dependencyCache = new Map();
-    this.security = new SecurityService();
+    this.network = new NetworkClient();
+    this.security = new SecurityService(this.network);
     this.readmeFallbackCache = new Map();
     this.downloadCache = new Map();
     this.emitter = new vscode.EventEmitter();
@@ -108,11 +113,14 @@ class NpmWorkspaceModel {
   }
 
   async refresh() {
+    const network = this.network;
     this.isLoading = true;
     this.message = 'Finding package.json files...';
     this.emit();
 
-    this.packageFiles = await findPackageJsonFiles();
+    const packageFiles = await findPackageJsonFiles();
+    network.throwIfCancelled();
+    this.packageFiles = packageFiles;
 
     if (!this.packageFiles.length) {
       this.selectedPackageJson = undefined;
@@ -137,6 +145,7 @@ class NpmWorkspaceModel {
     try {
       await this.refresh();
     } catch (error) {
+      if (isCancellation(error)) return;
       this.isLoading = false;
       this.message = getErrorMessage(error);
       this.emit();
@@ -145,9 +154,12 @@ class NpmWorkspaceModel {
   }
 
   clearCaches() {
+    this.loadId = (this.loadId || 0) + 1;
+    this.network.cancel();
+    this.network = new NetworkClient();
+    this.security = new SecurityService(this.network);
     this.registryCache.clear();
     this.dependencyCache.clear();
-    this.security.clear();
     this.readmeFallbackCache.clear();
     this.downloadCache.clear();
   }
@@ -165,6 +177,9 @@ class NpmWorkspaceModel {
   }
 
   async refreshPackage(name) {
+    const network = this.network;
+    const security = this.security;
+    const lockInfo = this.lockInfo;
     this.clearPackageCaches(name);
     const index = this.allDependencies.findIndex((dependency) => dependency.name === name);
     if (index === -1) {
@@ -180,9 +195,11 @@ class NpmWorkspaceModel {
         currentVersion: current.currentVersion,
         type: current.type
       },
-      this.lockInfo.paths.get(`node_modules/${name}`)
+      lockInfo.paths.get(`node_modules/${name}`), lockInfo, network
     );
-    await this.attachAuditInfo([refreshed]);
+    network.throwIfCancelled();
+    await security.enrichDependencies([refreshed], lockInfo);
+    network.throwIfCancelled();
     this.allDependencies[index] = refreshed;
     this.applyDependencyView(false);
     this.emit('detailRefresh');
@@ -190,6 +207,7 @@ class NpmWorkspaceModel {
   }
 
   async selectPackageJson(path) {
+    this.clearCaches();
     this.selectedPackageJson = path;
     await this.loadDependencies();
   }
@@ -252,6 +270,8 @@ class NpmWorkspaceModel {
 
     const loadId = this.loadId = (this.loadId || 0) + 1;
     const packageJsonPath = this.selectedPackageJson;
+    const network = this.network;
+    const security = this.security;
     this.isLoading = true;
     this.message = 'Loading dependencies...';
     this.emit();
@@ -263,10 +283,12 @@ class NpmWorkspaceModel {
       const entries = collectDependencyEntries(packageJson, 'all');
 
       const dependencies = await mapWithConcurrency(entries, 8, async (entry) => {
-        return this.enrichDependency(entry, lockInfo.paths.get(`node_modules/${entry.name}`), lockInfo);
+        network.throwIfCancelled();
+        return this.enrichDependency(entry, lockInfo.paths.get(`node_modules/${entry.name}`), lockInfo, network);
       });
 
-      await this.security.enrichDependencies(dependencies, lockInfo);
+      network.throwIfCancelled();
+      await security.enrichDependencies(dependencies, lockInfo);
       if (loadId !== this.loadId) return;
       this.packageJson = packageJson;
       this.lockInfo = lockInfo;
@@ -323,8 +345,8 @@ class NpmWorkspaceModel {
     }
   }
 
-  async enrichDependency(entry, lockPackage, lockInfo = this.lockInfo) {
-    const registry = await this.getRegistryPackage(entry.name);
+  async enrichDependency(entry, lockPackage, lockInfo = this.lockInfo, network = this.network) {
+    const registry = await this.getRegistryPackage(entry.name, network);
     const resolvedVersion = lockPackage?.version ? lockPackage.version : '';
     const versionInfo = resolveVersionInfo(registry, resolvedVersion || entry.currentVersion);
     const updateInfo = getUpdateInfo(resolvedVersion, registry.latestVersion);
@@ -359,44 +381,52 @@ class NpmWorkspaceModel {
   }
 
   async getDetail(name, dependencyHint) {
+    const network = this.network;
     const dependency = dependencyHint || this.findKnownDependency(name);
     const lockPackage = dependency?.lockStatus ? dependency : this.lockInfo.paths.get(`node_modules/${name}`);
     const detailData = await this.loadDetailData(name, dependency, lockPackage);
+    network.throwIfCancelled();
 
     return this.buildDetail(name, dependency, lockPackage, detailData);
   }
 
   async loadDetailData(name, dependency, lockPackage) {
+    const network = this.network;
+    const securityService = this.security;
+    const lockInfo = this.lockInfo;
     const initialResolvedVersion = dependency?.resolvedVersion || lockPackage?.version || '';
-    const registryPromise = this.getRegistryPackage(name);
-    const weeklyDownloadsPromise = this.getWeeklyDownloads(name);
+    const registryPromise = this.getRegistryPackage(name, network);
+    const weeklyDownloadsPromise = this.getWeeklyDownloads(name, network);
     const earlySecurityPromise = initialResolvedVersion
-      ? this.security.getPackageSecurity({
+      ? securityService.getPackageSecurity({
         name,
         resolvedVersion: initialResolvedVersion,
         dependency,
         lockPackage,
-        lockInfo: this.lockInfo
+        lockInfo
       })
       : null;
 
-    const registry = await registryPromise;
+    const [registry, weeklyDownloads, earlySecurity] = await Promise.all([
+      registryPromise, weeklyDownloadsPromise, earlySecurityPromise
+    ]);
+    network.throwIfCancelled();
     const versionInfo = resolveVersionInfo(registry, initialResolvedVersion || dependency?.currentVersion);
     const useRegistryReadme = isUsefulReadme(registry.readme);
     const resolvedVersion = initialResolvedVersion;
     const updateInfo = getUpdateInfo(resolvedVersion, registry.latestVersion);
-    const securityPromise = earlySecurityPromise ?? this.security.getPackageSecurity({
+    const securityPromise = earlySecurity ? Promise.resolve(earlySecurity) : securityService.getPackageSecurity({
       name,
       resolvedVersion,
       dependency,
       lockPackage,
-      lockInfo: this.lockInfo
+      lockInfo
     });
-    const [fallbackReadme, weeklyDownloads, security] = await Promise.all([
-      useRegistryReadme ? Promise.resolve('') : this.getFallbackReadme(name, registry),
-      weeklyDownloadsPromise,
+    const [fallbackReadme, security] = await Promise.all([
+      useRegistryReadme ? Promise.resolve('') : this.getFallbackReadme(name, registry, network),
       securityPromise
     ]);
+    network.throwIfCancelled();
     const readme = resolveDetailReadme(registry.readme, fallbackReadme, useRegistryReadme);
 
     return {
@@ -438,49 +468,45 @@ class NpmWorkspaceModel {
     };
   }
 
-  async getWeeklyDownloads(name) {
+  async getWeeklyDownloads(name, network = this.network) {
+    network.throwIfCancelled();
     if (this.downloadCache.has(name)) {
       return this.downloadCache.get(name);
     }
 
     try {
-      const response = await fetch(`${DOWNLOADS_API_BASE_URL}/${encodeURIComponent(name)}`, {
+      const data = await network.json(`${DOWNLOADS_API_BASE_URL}/${encodeURIComponent(name)}`, {
         headers: { accept: 'application/json' }
       });
-      if (!response.ok) {
-        throw new Error(`npm downloads returned ${response.status}`);
-      }
-
-      const data = await response.json();
+      network.throwIfCancelled();
       const downloads = Number.isFinite(data.downloads) ? data.downloads : null;
       this.downloadCache.set(name, downloads);
       return downloads;
     } catch (error) {
+      if (isCancellation(error)) throw error;
       reportOptionalFailure(`npm download count lookup failed for ${name}`, error);
       this.downloadCache.set(name, null);
       return null;
     }
   }
 
-  async getFallbackReadme(name, registry) {
+  async getFallbackReadme(name, registry, network = this.network) {
+    network.throwIfCancelled();
     if (this.readmeFallbackCache.has(name)) {
       return this.readmeFallbackCache.get(name);
     }
 
     for (const url of getGitHubReadmeCandidates(name, registry)) {
       try {
-        const response = await fetch(url, { headers: { accept: 'text/plain' } });
-        if (!response.ok) {
-          continue;
-        }
-
-        const text = await response.text();
+        const text = await network.text(url, { headers: { accept: 'text/plain' } });
         if (isUsefulReadme(text)) {
-          const readme = await resolveReadmeAssetUrls(text, url);
+          const readme = await resolveReadmeAssetUrls(text, url, network);
+          network.throwIfCancelled();
           this.readmeFallbackCache.set(name, readme);
           return readme;
         }
       } catch (error) {
+        if (isCancellation(error)) throw error;
         reportOptionalFailure(`README fallback lookup failed for ${url}`, error);
         continue;
       }
@@ -495,13 +521,16 @@ class NpmWorkspaceModel {
   }
 
   async getPackageDependencies(dependency, ancestry) {
+    const network = this.network;
+    const security = this.security;
+    const lockInfo = this.lockInfo;
     const cacheKey = `${dependency.name}@${dependency.resolvedVersion || dependency.currentVersion || 'latest'}`;
     const cached = this.dependencyCache.get(cacheKey);
     if (cached) {
       return cached;
     }
 
-    const registry = await this.getRegistryPackage(dependency.name);
+    const registry = await this.getRegistryPackage(dependency.name, network);
     const versionInfo = resolveVersionInfo(registry, dependency.resolvedVersion || dependency.currentVersion);
     const dependencies = versionInfo.manifest?.dependencies ? versionInfo.manifest.dependencies : {};
     const entries = Object.entries(dependencies)
@@ -517,10 +546,14 @@ class NpmWorkspaceModel {
       .sort((a, b) => a.name.localeCompare(b.name));
 
     const result = await mapWithConcurrency(entries, 8, async (entry) => {
-      return this.enrichDependency(entry, this.findLockPackageForChild(dependency, entry.name));
+      network.throwIfCancelled();
+      const lockPackage = dependency.lockPath ? resolveLockDependency(dependency.lockPath, entry.name, lockInfo) : null;
+      return this.enrichDependency(entry, lockPackage, lockInfo, network);
     });
 
-    await this.attachAuditInfo(result);
+    network.throwIfCancelled();
+    await security.enrichDependencies(result, lockInfo);
+    network.throwIfCancelled();
 
     this.dependencyCache.set(cacheKey, result);
     return result;
@@ -531,20 +564,16 @@ class NpmWorkspaceModel {
     return parentLockPath ? resolveLockDependency(parentLockPath, childName, this.lockInfo) : null;
   }
 
-  async getRegistryPackage(name) {
+  async getRegistryPackage(name, network = this.network) {
+    network.throwIfCancelled();
     const cached = this.registryCache.get(name);
     if (cached) {
       return cached;
     }
 
     const url = `${REGISTRY_BASE_URL}/${encodeURIComponent(name)}`;
-    const response = await fetch(url, { headers: { accept: 'application/json' } });
-
-    if (!response.ok) {
-      throw new Error(`npm registry returned ${response.status} for ${name}`);
-    }
-
-    const data = await response.json();
+    const data = await network.json(url, { headers: { accept: 'application/json' } });
+    network.throwIfCancelled();
     const normalized = {
       name,
       description: data.description || '',
@@ -632,6 +661,12 @@ class NpmWorkspaceModel {
     this.emitter.fire(reason);
   }
 
+  dispose() {
+    this.loadId = (this.loadId || 0) + 1;
+    this.network.cancel();
+    this.emitter.dispose();
+  }
+
   getCacheStats() {
     return {
       registry: this.registryCache.size,
@@ -676,6 +711,7 @@ class DependenciesTreeProvider {
         const ancestry = [...item.ancestry, item.dependency.name];
         return dependencies.map((dependency) => new DependencyTreeItem(dependency, ancestry));
       } catch (error) {
+        if (isCancellation(error)) return [];
         return [new MessageTreeItem(getErrorMessage(error))];
       }
     }
@@ -826,6 +862,7 @@ class DashboardPanel {
             break;
         }
       } catch (error) {
+        if (isCancellation(error)) return;
         this.post({ type: 'error', message: getErrorMessage(error) });
       }
     });
@@ -1429,12 +1466,12 @@ function renderReadmeHtml(readme) {
   return sanitizeReadmeHtml(markdown.render(String(readme || '')));
 }
 
-async function resolveReadmeAssetUrls(readme, readmeUrl) {
+async function resolveReadmeAssetUrls(readme, readmeUrl, network) {
   const baseUrl = getReadmeBaseUrl(readmeUrl);
   if (!baseUrl) {
     return readme;
   }
-  const assetUrlMap = await getReadmeAssetUrlMap(readme, readmeUrl, baseUrl);
+  const assetUrlMap = await getReadmeAssetUrlMap(readme, readmeUrl, baseUrl, network);
 
   return String(readme || '')
     .replace(/(!?\[[^\]\r\n]{0,1000}]\()([^)\s]{1,2048})(\))/g, (match, prefix, url, suffix) => {
@@ -1458,7 +1495,7 @@ async function resolveReadmeAssetUrls(readme, readmeUrl) {
     });
 }
 
-async function getReadmeAssetUrlMap(readme, readmeUrl, baseUrl) {
+async function getReadmeAssetUrlMap(readme, readmeUrl, baseUrl, network) {
   const rootBaseUrl = getGitHubRawRootBaseUrl(readmeUrl);
   if (!rootBaseUrl || rootBaseUrl === baseUrl) {
     return new Map();
@@ -1468,10 +1505,10 @@ async function getReadmeAssetUrlMap(readme, readmeUrl, baseUrl) {
   const entries = await Promise.all(urls.map(async (url) => {
     const primary = resolveReadmeUrl(url, baseUrl);
     const fallback = resolveReadmeUrl(url, rootBaseUrl);
-    if (primary === fallback || await canFetchAsset(primary)) {
+    if (primary === fallback || await canFetchAsset(primary, network)) {
       return [url, primary];
     }
-    if (await canFetchAsset(fallback)) {
+    if (await canFetchAsset(fallback, network)) {
       return [url, fallback];
     }
     return [url, primary];
@@ -1513,20 +1550,23 @@ function getGitHubRawRootBaseUrl(readmeUrl) {
   return match ? match[1] : '';
 }
 
-async function canFetchAsset(url) {
+async function canFetchAsset(url, network) {
   try {
-    const response = await fetch(url, { method: 'HEAD' });
-    if (response.ok) {
+    if (await network.request(url, { method: 'HEAD' }, (response) => response.ok)) {
       return true;
     }
   } catch (error) {
+    if (isCancellation(error)) throw error;
     reportOptionalFailure(`Asset HEAD request failed for ${url}; retrying with GET`, error);
   }
 
   try {
-    const response = await fetch(url);
-    return response.ok;
+    return await network.request(url, {}, async (response) => {
+      await response.body?.cancel();
+      return response.ok;
+    });
   } catch (error) {
+    if (isCancellation(error)) throw error;
     reportOptionalFailure(`Asset GET request failed for ${url}`, error);
     return false;
   }
@@ -1988,6 +2028,7 @@ async function mapWithConcurrency(items, limit, mapper) {
       try {
         results[index] = await mapper(items[index], index);
       } catch (error) {
+        if (isCancellation(error)) throw error;
         results[index] = {
           ...items[index],
           latestVersion: '',

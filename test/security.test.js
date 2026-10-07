@@ -1,6 +1,40 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { SecurityService } = require('../lib/security');
+const { NetworkClient } = require('../lib/network');
+
+test('監査とOSVのキャンセルを取得失敗としてキャッシュしない', async (t) => {
+  const signals = [];
+  mockFetch(t, async (_, options) => {
+    signals.push(options.signal);
+    return new Promise(() => {});
+  });
+  const network = new NetworkClient();
+  const service = new SecurityService(network);
+  const requests = [
+    service.getAuditAdvisories({ example: ['1.0.0'] }),
+    service.getOsvVulnerabilities([{ name: 'example', version: '1.0.0' }])
+  ];
+  const checks = requests.map((request) => assert.rejects(request, { name: 'AbortError' }));
+  network.cancel();
+  await Promise.all(checks);
+  assert(signals.every((signal) => signal.aborted));
+  assert.equal(service.auditCache.size, 0);
+  assert.equal(service.osvCache.size, 0);
+});
+
+test('OSVのタイムアウトを取得失敗として伝え、次の取得で再試行する', async (t) => {
+  mockFetch(t, async () => new Promise(() => {}));
+  const service = new SecurityService(new NetworkClient({ timeoutMs: 5 }));
+  const packages = [{ name: 'example', version: '1.0.0' }];
+  const failed = await service.getOsvVulnerabilities(packages);
+  assert.equal(failed.statuses.get('example@1.0.0').status, 'error');
+  assert.match(failed.statuses.get('example@1.0.0').error, /timed out/);
+  assert.equal(service.osvCache.size, 0);
+  global.fetch = async () => ({ ok: true, json: async () => ({ results: [{}] }) });
+  const retried = await service.getOsvVulnerabilities(packages);
+  assert.equal(retried.statuses.get('example@1.0.0').status, 'ok');
+});
 
 test('監査とOSVはルートの同名依存より中間階層の依存を優先する', async () => {
   const root = { name: 'root', version: '1.0.0', path: 'node_modules/root', dependencies: { parent: '*' } };
