@@ -2,6 +2,31 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { SecurityService } = require('../lib/security');
 
+test('監査とOSVはルートの同名依存より中間階層の依存を優先する', async () => {
+  const root = { name: 'root', version: '1.0.0', path: 'node_modules/root', dependencies: { parent: '*' } };
+  const parent = { name: 'parent', version: '1.0.0', path: `${root.path}/node_modules/parent`, dependencies: { child: '*' } };
+  const child = { name: 'child', version: '1.0.0', path: `${parent.path}/node_modules/child`, dependencies: { target: '*' } };
+  const target = { name: 'target', version: '2.0.0', path: `${root.path}/node_modules/target` };
+  const hoisted = { name: 'target', version: '9.0.0', path: 'node_modules/target' };
+  const paths = new Map([root, parent, child, target, hoisted].map((value) => [value.path, value]));
+  const lockInfo = { exists: true, paths, packages: new Map([['target', hoisted]]) };
+  const service = new SecurityService();
+  service.getAuditAdvisories = async () => new Map([['target', [
+    { title: 'Intermediate vulnerability', vulnerableVersions: '<3.0.0', severity: 'high' }
+  ]]]);
+  let queried;
+  service.getOsvVulnerabilities = async (packages) => {
+    queried = packages;
+    return new Map([['target@2.0.0', [{ id: 'OSV-intermediate' }]], ['target@9.0.0', [{ id: 'OSV-unrelated' }]]]);
+  };
+  service.getThreatIntelForCves = async () => ({ epss: new Map(), kev: new Map(), ssvc: new Map() });
+  const security = await service.getPackageSecurity({ name: child.name, resolvedVersion: child.version, lockPackage: child, lockInfo });
+  assert.deepEqual(queried, [{ name: 'child', version: '1.0.0' }, { name: 'target', version: '2.0.0' }]);
+  assert.deepEqual(security.transitiveVulnerabilities.map((value) => value.title), ['Intermediate vulnerability']);
+  assert.deepEqual(security.transitiveOsvVulnerabilities.map((value) => value.id), ['OSV-intermediate']);
+  assert.equal(security.transitiveVulnerabilities[0].packagePath, target.path);
+});
+
 function mockFetch(t, handler) {
   const originalFetch = global.fetch;
   global.fetch = handler;

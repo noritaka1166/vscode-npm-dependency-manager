@@ -8,6 +8,7 @@ const { PACKAGE_MANAGERS, createPackageInstallCommand, detectPackageManager } = 
 const { createCycloneDxSbom, createSpdxSbom } = require('./lib/sbom');
 const { createDependencyReportCsv } = require('./lib/dependency-report');
 const { DependencyUpdater } = require('./lib/dependency-update');
+const { resolveLockDependency } = require('./lib/lock-dependency');
 
 const VIEW_ID = 'workspaceNpmSidebar.dependenciesView';
 const PANEL_TYPE = 'workspaceNpmSidebar.dashboard';
@@ -527,15 +528,7 @@ class NpmWorkspaceModel {
 
   findLockPackageForChild(parentDependency, childName) {
     const parentLockPath = parentDependency?.lockPath ? parentDependency.lockPath : '';
-    if (parentLockPath) {
-      const childPath = `${parentLockPath}/node_modules/${childName}`;
-      const byPath = this.lockInfo.paths.get(childPath);
-      if (byPath) {
-        return byPath;
-      }
-    }
-
-    return this.lockInfo.packages.get(childName);
+    return parentLockPath ? resolveLockDependency(parentLockPath, childName, this.lockInfo) : null;
   }
 
   async getRegistryPackage(name) {

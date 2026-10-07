@@ -2,6 +2,29 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createCycloneDxSbom, createSpdxSbom, resolveLockDependency } = require('../lib/sbom');
 
+test('CycloneDXとSPDXは中間階層の依存を選び、別サブツリーを直接依存として扱わない', () => {
+  const parent = { name: 'parent', version: '1.0.0', path: 'node_modules/root/node_modules/parent', dependencies: { target: '*' } };
+  const intermediate = { name: 'target', version: '2.0.0', path: 'node_modules/root/node_modules/target' };
+  const hoisted = { name: 'target', version: '9.0.0', path: 'node_modules/target' };
+  const sibling = { name: 'missing', version: '3.0.0', path: 'node_modules/sibling/node_modules/missing' };
+  const input = {
+    packageJson: { name: 'app', version: '1.0.0', dependencies: { missing: '*' } },
+    packageJsonPath: '/workspace/package.json',
+    lockInfo: {
+      paths: new Map([parent, intermediate, hoisted, sibling].map((value) => [value.path, value])),
+      packages: new Map([['target', hoisted], ['missing', sibling]])
+    }
+  };
+  const cyclone = createCycloneDxSbom(input);
+  assert.deepEqual(cyclone.dependencies.find((value) => value.ref === 'pkg:npm/parent@1.0.0').dependsOn, ['pkg:npm/target@2.0.0']);
+  assert.deepEqual(cyclone.dependencies.find((value) => value.ref === 'pkg:npm/app@1.0.0').dependsOn, ['npm:missing@unresolved']);
+  const spdx = createSpdxSbom(input);
+  const parentId = spdx.packages.find((value) => value.name === 'parent').SPDXID;
+  const targetId = spdx.packages.find((value) => value.name === 'target' && value.versionInfo === '2.0.0').SPDXID;
+  assert.deepEqual(spdx.relationships.filter((value) => value.spdxElementId === parentId && value.relationshipType === 'DEPENDS_ON').map((value) => value.relatedSpdxElement), [targetId]);
+  assert(spdx.packages.some((value) => value.name === 'missing' && value.comment));
+});
+
 function createLockInfo() {
   const rootDependency = {
     name: 'root-dependency',

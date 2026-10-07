@@ -39,6 +39,22 @@ function createModel(files) {
   return { model, documents };
 }
 
+test('依存ツリーでも中間階層を優先し、探索できない同名依存を代用しない', () => {
+  const { model } = createModel(new Map());
+  const intermediate = { path: 'node_modules/root/node_modules/target', version: '2.0.0' };
+  const hoisted = { path: 'node_modules/target', version: '9.0.0' };
+  model.lockInfo.paths.set(intermediate.path, intermediate);
+  model.lockInfo.paths.set(hoisted.path, hoisted);
+  model.lockInfo.packages.set('target', hoisted);
+  const parent = { lockPath: 'node_modules/root/node_modules/parent/node_modules/child' };
+  assert.equal(model.findLockPackageForChild(parent, 'target'), intermediate);
+  model.lockInfo.paths.delete(intermediate.path);
+  assert.equal(model.findLockPackageForChild(parent, 'target'), hoisted);
+  model.lockInfo.paths.delete(hoisted.path);
+  assert.equal(model.findLockPackageForChild(parent, 'target'), null);
+  assert.equal(model.findLockPackageForChild({}, 'target'), null);
+});
+
 function stubRegistryAndSecurity(model, versions = { '1.0.0': {}, '2.0.0': {} }) {
   const auditInputs = [];
   const osvInputs = [];
