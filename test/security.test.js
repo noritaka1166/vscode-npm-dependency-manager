@@ -2,6 +2,110 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { SecurityService } = require('../lib/security');
 
+function mockFetch(t, handler) {
+  const originalFetch = global.fetch;
+  global.fetch = handler;
+  t.after(() => { global.fetch = originalFetch; });
+}
+
+test('OSV通信失敗を一覧で取得失敗として扱い、詳細を開くと再試行して正常な空結果をキャッシュする', async (t) => {
+  let requests = 0;
+  mockFetch(t, async () => {
+    if (++requests === 1) throw new Error('Network unavailable');
+    return { ok: true, json: async () => ({ results: [{}] }) };
+  });
+  const service = new SecurityService();
+  service.getAuditAdvisories = async () => new Map();
+  const lockInfo = { exists: false, paths: new Map() };
+  const dependency = { name: 'example', resolvedVersion: '1.0.0' };
+  await service.enrichDependencies([dependency], lockInfo);
+  assert.equal(dependency.osvStatus, 'error');
+  assert.equal(dependency.osvError, 'Network unavailable');
+  assert.equal(dependency.auditStatus, 'unknown');
+  assert.equal(service.osvCache.has('example@1.0.0'), false);
+  const detail = await service.getPackageSecurity({ name: 'example', resolvedVersion: '1.0.0', dependency, lockInfo });
+  assert.equal(detail.osvStatus, 'ok');
+  assert.equal(detail.osvError, '');
+  assert.equal(detail.auditStatus, 'ok');
+  assert.deepEqual(detail.osvVulnerabilities, []);
+  await service.getOsvVulnerabilities([{ name: 'example', version: '1.0.0' }]);
+  assert.equal(requests, 2);
+});
+
+test('OSVのHTTPエラー・JSON解析失敗・不完全な応答を正常結果として保存しない', async (t) => {
+  const responses = [
+    { ok: false, status: 503 },
+    { ok: true, json: async () => { throw new Error('Invalid JSON'); } },
+    { ok: true, json: async () => ({ results: [] }) },
+    { ok: true, json: async () => ({ results: [null] }) },
+    { ok: true, json: async () => ({ results: [{ vulns: 'invalid' }] }) }
+  ];
+  mockFetch(t, async () => responses.shift());
+  const service = new SecurityService();
+  const packages = [{ name: 'example', version: '1.0.0' }];
+  for (let i = 0; i < 5; i++) {
+    const result = await service.getOsvVulnerabilities(packages);
+    assert.equal(result.statuses.get('example@1.0.0').status, 'error');
+    assert.equal(service.osvCache.has('example@1.0.0'), false);
+  }
+});
+
+test('OSV詳細の部分失敗でも取得済み脆弱性を保持し、失敗した詳細だけ再取得する', async (t) => {
+  const counts = new Map();
+  mockFetch(t, async (url) => {
+    const count = (counts.get(url) || 0) + 1;
+    counts.set(url, count);
+    if (url.endsWith('/querybatch')) return { ok: true, json: async () => ({ results: [{ vulns: [{ id: 'OSV-A' }, { id: 'OSV-B' }] }] }) };
+    if (url.endsWith('/OSV-B') && count === 1) return { ok: false, status: 503 };
+    return { ok: true, json: async () => ({ id: url.split('/').at(-1), summary: 'Example vulnerability' }) };
+  });
+  const service = new SecurityService();
+  const packages = [{ name: 'example', version: '1.0.0' }];
+  const first = await service.getOsvVulnerabilities(packages);
+  assert.equal(first.statuses.get('example@1.0.0').status, 'error');
+  assert.deepEqual(first.get('example@1.0.0').map((vuln) => vuln.id), ['OSV-A']);
+  assert.equal(service.osvCache.has('example@1.0.0'), false);
+  const second = await service.getOsvVulnerabilities(packages);
+  assert.equal(second.statuses.get('example@1.0.0').status, 'ok');
+  assert.equal(second.get('example@1.0.0').length, 2);
+  assert.equal(counts.get('https://api.osv.dev/v1/vulns/OSV-A'), 1);
+  assert.equal(counts.get('https://api.osv.dev/v1/vulns/OSV-B'), 2);
+});
+
+test('npmで検出済みの脆弱性はOSV失敗時にも維持する', async (t) => {
+  mockFetch(t, async () => { throw new Error('OSV unavailable'); });
+  const service = new SecurityService();
+  service.getAuditAdvisories = async () => new Map([['example', [{ title: 'Known vulnerability', severity: 'high' }]]]);
+  const dependency = { name: 'example', resolvedVersion: '1.0.0' };
+  await service.enrichDependencies([dependency], { exists: false, paths: new Map() });
+  assert.equal(dependency.auditStatus, 'vulnerable');
+  assert.equal(dependency.osvStatus, 'error');
+  assert.equal(dependency.vulnerabilities.length, 1);
+});
+
+test('間接依存のOSV取得失敗も詳細に伝え、次に開くと再試行する', async (t) => {
+  let requests = 0;
+  mockFetch(t, async () => {
+    if (++requests === 1) return { ok: false, status: 503 };
+    return { ok: true, json: async () => ({ results: [{}] }) };
+  });
+  const service = new SecurityService();
+  service.getAuditAdvisories = async () => new Map();
+  service.osvCache.set('root@1.0.0', []);
+  const root = { name: 'root', version: '1.0.0', path: 'node_modules/root', dependencies: { child: '^1.0.0' } };
+  const child = { name: 'child', version: '1.0.0', path: 'node_modules/child' };
+  const lockInfo = { exists: true, paths: new Map([[root.path, root], [child.path, child]]), packages: new Map([[root.name, root], [child.name, child]]) };
+  const context = { name: root.name, resolvedVersion: root.version, lockPackage: root, lockInfo };
+  const failed = await service.getPackageSecurity(context);
+  assert.equal(failed.osvStatus, 'ok');
+  assert.equal(failed.transitiveOsvStatus, 'error');
+  assert.equal(failed.auditStatus, 'unknown');
+  const retried = await service.getPackageSecurity({ ...context, dependency: failed });
+  assert.equal(retried.transitiveOsvStatus, 'ok');
+  assert.equal(retried.auditStatus, 'ok');
+  assert.equal(requests, 2);
+});
+
 function createService(auditInputs) {
   const service = new SecurityService();
   service.getAuditAdvisories = async (input) => {

@@ -13,7 +13,7 @@ function dashboard(overrides = {}) {
     window: { location: { origin: 'https://webview.test' }, addEventListener() {} }
   };
   vm.runInNewContext(source.replace('  vscode.postMessage({ type: \'ready\' });',
-    '  globalThis.dashboard = { state, getVisibleDependencies, renderActiveFilters, renderUpdateStatus, renderPackageCard };'), context);
+    '  globalThis.dashboard = { state, getVisibleDependencies, renderActiveFilters, renderUpdateStatus, renderPackageCard, renderRisk, renderSecurity };'), context);
   Object.assign(context.dashboard.state, overrides);
   return context.dashboard;
 }
@@ -24,6 +24,23 @@ const packages = [
   { name: 'gamma', description: 'HTTP server', type: 'dependencies', license: 'MIT', updateType: 'major', auditStatus: 'unknown' },
   { name: 'delta', description: 'Validation', type: 'dependencies', license: 'MIT', updateType: 'current', auditStatus: 'ok' }
 ];
+
+test('OSV失敗を一覧と詳細に表示し、検出なしの成功表示と区別する', () => {
+  const ui = dashboard();
+  for (const failure of [
+    { auditStatus: 'unknown', osvStatus: 'error', osvError: '<img src=x> outage' },
+    { auditStatus: 'unknown', transitiveOsvStatus: 'error', transitiveOsvError: 'Tree lookup failed' }
+  ]) {
+    assert.match(ui.renderRisk(failure), /OSV unavailable/);
+    const security = ui.renderSecurity(failure);
+    assert.match(security, /OSV lookup incomplete/);
+    assert(!security.includes('No deprecation or known vulnerability signals'));
+    assert(!security.includes('<img'));
+    assert(!security.includes('Add or update package-lock.json'));
+  }
+  assert.match(ui.renderRisk({ auditStatus: 'ok', osvStatus: 'ok' }), /badge ok/);
+  assert.match(ui.renderSecurity({ auditStatus: 'ok', osvStatus: 'ok' }), /No deprecation or known vulnerability signals/);
+});
 
 test('種別・検索・更新・ライセンス条件を組み合わせて絞り込む', () => {
   const ui = dashboard({ dependencies: packages, filter: 'dependencies', searchQuery: 'http', updateFilter: 'major', licenseFilter: 'MIT' });

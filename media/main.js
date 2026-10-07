@@ -908,6 +908,9 @@
     if (dependency.auditStatus === 'unknown') {
       badges.push('<span class="badge unknown">not checked</span>');
     }
+    if (dependency.osvStatus === 'error' || dependency.transitiveOsvStatus === 'error') {
+      badges.push('<span class="badge unknown">OSV unavailable</span>');
+    }
     return badges.length ? badges.join('') : '<span class="badge ok">ok</span>';
   }
 
@@ -1154,7 +1157,7 @@
     const transitiveVulnerabilities = detail.transitiveVulnerabilities || [];
     const transitiveOsvVulnerabilities = detail.transitiveOsvVulnerabilities || [];
     const securitySignals = detail.securitySignals || {};
-    if (!detail.deprecated && !vulnerabilities.length && !osvVulnerabilities.length && !transitiveVulnerabilities.length && !transitiveOsvVulnerabilities.length && detail.auditStatus !== 'unknown') {
+    if (!detail.deprecated && !vulnerabilities.length && !osvVulnerabilities.length && !transitiveVulnerabilities.length && !transitiveOsvVulnerabilities.length && detail.auditStatus !== 'unknown' && detail.osvStatus !== 'error' && detail.transitiveOsvStatus !== 'error') {
       return '<section class="sideSection security okPanel"><h2>Security</h2><p>No deprecation or known vulnerability signals found for the resolved version.</p></section>';
     }
 
@@ -1162,6 +1165,7 @@
       renderSecuritySignals(securitySignals),
       renderDeprecatedNotice(detail),
       renderUnknownAuditNotice(detail),
+      renderOsvErrorNotice(detail),
       renderAdvisoryGroup('npm audit advisories', vulnerabilities, 'npm'),
       renderAdvisoryGroup('OSV vulnerabilities', osvVulnerabilities, 'osv'),
       renderAdvisoryGroup('Transitive vulnerabilities', transitiveVulnerabilities, 'transitiveNpm'),
@@ -1188,8 +1192,14 @@
     if (detail.auditStatus !== 'unknown') {
       return '';
     }
-    const message = detail.auditError || 'A resolved version was not available. Add or update package-lock.json for more accurate audit results.';
+    const message = detail.auditError || detail.osvError || detail.transitiveOsvError || 'A resolved version was not available. Add or update package-lock.json for more accurate audit results.';
     return `<div class="notice unknownNotice"><strong>Vulnerabilities not checked</strong><p>${escapeHtml(message)}</p></div>`;
+  }
+
+  function renderOsvErrorNotice(detail) {
+    if (detail.osvStatus !== 'error' && detail.transitiveOsvStatus !== 'error') return '';
+    const message = [detail.osvError, detail.transitiveOsvError].filter(Boolean).join('; ');
+    return `<div class="notice unknownNotice"><strong>OSV lookup incomplete</strong><p>${escapeHtml(message)}</p><p>Reopen package details or refresh to retry.</p></div>`;
   }
 
   function renderSecuritySignals(signals) {
