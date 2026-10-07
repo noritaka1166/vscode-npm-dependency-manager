@@ -15,6 +15,7 @@ function createModel(files) {
     Uri: { file: (fsPath) => ({ fsPath }) },
     FileType: { File: 1 },
     workspace: {
+      asRelativePath: (value) => value,
       textDocuments: documents,
       fs: {
         async readFile(uri) {
@@ -37,6 +38,89 @@ function createModel(files) {
   model.packageFiles = [...files.keys()].filter((value) => value.endsWith('/package.json')).map((value) => ({ path: value }));
   return { model, documents };
 }
+
+function stubRegistryAndSecurity(model, versions = { '1.0.0': {}, '2.0.0': {} }) {
+  const auditInputs = [];
+  const osvInputs = [];
+  model.getRegistryPackage = async () => ({
+    latestVersion: '2.0.0',
+    versions,
+    time: { '1.0.0': '2025-01-01', '2.0.0': '2026-01-01' },
+    readme: '# Example package\nRegistry reference documentation.'
+  });
+  model.getWeeklyDownloads = async () => null;
+  model.security.getAuditAdvisories = async (input) => {
+    auditInputs.push(input);
+    return new Map();
+  };
+  model.security.getOsvVulnerabilities = async (input) => {
+    osvInputs.push(input);
+    return new Map();
+  };
+  model.security.getThreatIntelForCves = async () => ({ epss: new Map(), kev: new Map(), ssvc: new Map() });
+  return { auditInputs, osvInputs };
+}
+
+test('lockfileなし・未対応lockfileでは一覧と詳細に推測した解決済み値を入れず監査しない', async () => {
+  for (const [packageManager, lockfile] of [['npm', ''], ['pnpm', 'pnpm-lock.yaml'], ['yarn', 'yarn.lock'], ['bun', 'bun.lock']]) {
+    const files = new Map([['/a/package.json', { packageManager, dependencies: { example: '^1.0.0' } }]]);
+    if (lockfile) files.set(`/a/${lockfile}`, {});
+    const { model } = createModel(files);
+    const { auditInputs, osvInputs } = stubRegistryAndSecurity(model, { '2.0.0': {} });
+    model.selectedPackageJson = '/a/package.json';
+    await model.loadDependencies();
+    const dependency = model.allDependencies[0];
+    const detail = await model.getDetail('example');
+    for (const value of [dependency, detail]) {
+      assert.equal(value.currentVersion, '^1.0.0');
+      assert.equal(value.resolvedVersion, '');
+      assert.equal(value.resolvedPublishedAt, '');
+      assert.equal(value.referenceVersion, '2.0.0');
+      assert.equal(value.latestVersion, '2.0.0');
+      assert.equal(value.updateType, 'unknown');
+      assert.equal(value.auditStatus, 'unknown');
+    }
+    assert(auditInputs.every((input) => Object.keys(input).length === 0));
+    assert(osvInputs.every((input) => input.length === 0));
+    assert.match(model.createDependencyReportCsv(), /unknown/);
+  }
+});
+
+test('lockfileで確認した直接依存のバージョンだけを一覧・詳細・監査に使う', async () => {
+  const { model } = createModel(new Map([
+    ['/a/package.json', { dependencies: { example: '^1.0.0' } }],
+    ['/a/package-lock.json', { lockfileVersion: 3, packages: {
+      'node_modules/example': { version: '1.0.0' }
+    } }]
+  ]));
+  const { auditInputs, osvInputs } = stubRegistryAndSecurity(model);
+  model.selectedPackageJson = '/a/package.json';
+  await model.loadDependencies();
+  for (const value of [model.allDependencies[0], await model.getDetail('example')]) {
+    assert.equal(value.resolvedVersion, '1.0.0');
+    assert.equal(value.resolvedPublishedAt, '2025-01-01');
+    assert.equal(value.updateType, 'major');
+    assert.equal(value.auditStatus, 'ok');
+  }
+  assert.deepEqual(auditInputs[0].example, ['1.0.0']);
+  assert.equal(JSON.stringify(osvInputs[0]), JSON.stringify([{ name: 'example', version: '1.0.0' }]));
+});
+
+test('直接依存のlockエントリがない場合は同名の間接依存を解決済み値に代用しない', async () => {
+  const { model } = createModel(new Map([
+    ['/a/package.json', { dependencies: { example: '^1.0.0' } }],
+    ['/a/package-lock.json', { lockfileVersion: 3, packages: {
+      'node_modules/parent/node_modules/example': { version: '9.0.0' }
+    } }]
+  ]));
+  stubRegistryAndSecurity(model);
+  model.selectedPackageJson = '/a/package.json';
+  await model.loadDependencies();
+  await model.refreshPackage('example');
+  assert.equal(model.allDependencies[0].resolvedVersion, '');
+  assert.equal((await model.getDetail('example')).resolvedVersion, '');
+  assert.equal((await model.loadDetailData('example')).security.auditStatus, 'unknown');
+});
 
 test('更新前後のバージョンはregistryの推測値ではなく直接依存のlockfileから読む', async () => {
   const files = new Map([

@@ -179,7 +179,7 @@ class NpmWorkspaceModel {
         currentVersion: current.currentVersion,
         type: current.type
       },
-      this.lockInfo.packages.get(name)
+      this.lockInfo.paths.get(`node_modules/${name}`)
     );
     await this.attachAuditInfo([refreshed]);
     this.allDependencies[index] = refreshed;
@@ -262,7 +262,7 @@ class NpmWorkspaceModel {
       const entries = collectDependencyEntries(packageJson, 'all');
 
       const dependencies = await mapWithConcurrency(entries, 8, async (entry) => {
-        return this.enrichDependency(entry, lockInfo.packages.get(entry.name), lockInfo);
+        return this.enrichDependency(entry, lockInfo.paths.get(`node_modules/${entry.name}`), lockInfo);
       });
 
       await this.security.enrichDependencies(dependencies, lockInfo);
@@ -326,13 +326,14 @@ class NpmWorkspaceModel {
     const registry = await this.getRegistryPackage(entry.name);
     const resolvedVersion = lockPackage?.version ? lockPackage.version : '';
     const versionInfo = resolveVersionInfo(registry, resolvedVersion || entry.currentVersion);
-    const updateInfo = getUpdateInfo(resolvedVersion || versionInfo.version || entry.currentVersion, registry.latestVersion);
+    const updateInfo = getUpdateInfo(resolvedVersion, registry.latestVersion);
 
     return {
       ...entry,
-      resolvedVersion: resolvedVersion || versionInfo.version || '',
+      resolvedVersion,
+      referenceVersion: versionInfo.version || '',
       latestVersion: registry.latestVersion,
-      resolvedPublishedAt: getPublishedAt(registry.time, resolvedVersion || versionInfo.version),
+      resolvedPublishedAt: getPublishedAt(registry.time, resolvedVersion),
       latestPublishedAt: getPublishedAt(registry.time, registry.latestVersion),
       lockStatus: getDependencyLockStatus(lockPackage, lockInfo),
       lockPath: lockPackage?.path ? lockPackage.path : '',
@@ -358,14 +359,14 @@ class NpmWorkspaceModel {
 
   async getDetail(name, dependencyHint) {
     const dependency = dependencyHint || this.findKnownDependency(name);
-    const lockPackage = dependency?.lockStatus ? dependency : this.lockInfo.packages.get(name);
+    const lockPackage = dependency?.lockStatus ? dependency : this.lockInfo.paths.get(`node_modules/${name}`);
     const detailData = await this.loadDetailData(name, dependency, lockPackage);
 
     return this.buildDetail(name, dependency, lockPackage, detailData);
   }
 
   async loadDetailData(name, dependency, lockPackage) {
-    const initialResolvedVersion = dependency?.resolvedVersion || '';
+    const initialResolvedVersion = dependency?.resolvedVersion || lockPackage?.version || '';
     const registryPromise = this.getRegistryPackage(name);
     const weeklyDownloadsPromise = this.getWeeklyDownloads(name);
     const earlySecurityPromise = initialResolvedVersion
@@ -379,9 +380,9 @@ class NpmWorkspaceModel {
       : null;
 
     const registry = await registryPromise;
-    const versionInfo = resolveVersionInfo(registry, dependency?.resolvedVersion || dependency?.currentVersion);
+    const versionInfo = resolveVersionInfo(registry, initialResolvedVersion || dependency?.currentVersion);
     const useRegistryReadme = isUsefulReadme(registry.readme);
-    const resolvedVersion = initialResolvedVersion || versionInfo.version;
+    const resolvedVersion = initialResolvedVersion;
     const updateInfo = getUpdateInfo(resolvedVersion, registry.latestVersion);
     const securityPromise = earlySecurityPromise ?? this.security.getPackageSecurity({
       name,
@@ -417,6 +418,7 @@ class NpmWorkspaceModel {
       ...getDependencyDetailFields(dependency),
       latestVersion: registry.latestVersion,
       resolvedVersion,
+      referenceVersion: versionInfo.version || '',
       resolvedPublishedAt: getPublishedAt(registry.time, resolvedVersion),
       latestPublishedAt: getPublishedAt(registry.time, registry.latestVersion),
       updateType: updateInfo.type,
@@ -507,7 +509,7 @@ class NpmWorkspaceModel {
         currentVersion,
         type: 'dependencies',
         parentName: dependency.name,
-        parentVersion: dependency.resolvedVersion || versionInfo.version,
+        parentVersion: dependency.resolvedVersion || '',
         parentRange: dependency.currentVersion,
         resolvedFromVersion: versionInfo.version
       }))

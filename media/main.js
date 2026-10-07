@@ -706,7 +706,8 @@
             <section class="sideSection">
               <h2>Versions</h2>
               <dl class="facts">
-                ${detail.resolvedVersion ? `<div><dt>Resolved</dt><dd>${escapeHtml(detail.resolvedVersion)}</dd></div>` : ''}
+                <div><dt>Resolved</dt><dd>${escapeHtml(detail.resolvedVersion || 'Unavailable')}</dd></div>
+                ${detail.referenceVersion && detail.referenceVersion !== detail.resolvedVersion ? `<div><dt>Metadata reference version</dt><dd>${escapeHtml(detail.referenceVersion)}</dd></div>` : ''}
                 <div><dt>Resolved published</dt><dd>${renderDate(detail.resolvedPublishedAt)}</dd></div>
                 <div><dt>Latest</dt><dd>${escapeHtml(detail.latestVersion || '-')}</dd></div>
                 <div><dt>Latest published</dt><dd>${renderDate(detail.latestPublishedAt)}</dd></div>
