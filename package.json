@@ -114,7 +114,7 @@
   },
   "dependencies": {
     "dompurify": "^3.4.16",
-    "markdown-it": "^15.0.2",
+    "markdown-it": "^15.0.3",
     "semver": "^7.8.5"
   }
 }
